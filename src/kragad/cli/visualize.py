@@ -29,8 +29,8 @@ from transformers import (
 # 0. Environment & Setup
 # ==========================================
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-KRAGAD_PROJECT_ROOT = kragad_paths.project_root()
-KRAGAD_DATA_ROOT = kragad_paths.data_root()
+GLLS_PROJECT_ROOT = kragad_paths.project_root()
+GLLS_DATA_ROOT = kragad_paths.data_root()
 DEFAULT_MMAD_ROOT = kragad_paths.dataset_root()
 DEFAULT_GRAPH_ROOT = kragad_paths.graph_cache_root()
 DEFAULT_SAM3_PATH = kragad_paths.sam3_path()
@@ -1374,7 +1374,7 @@ def create_ui():
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Launch the KRagAD Gradio visualization UI.")
+    parser = argparse.ArgumentParser(description="Launch the GLLS Gradio visualization UI.")
     parser.add_argument("--host", default="0.0.0.0", help="Host/interface to bind.")
     parser.add_argument("--port", type=int, default=None, help="Port to bind. Defaults to the first free port from --start_port.")
     parser.add_argument("--start_port", type=int, default=7860, help="First port to try when --port is not set.")

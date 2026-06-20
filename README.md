@@ -1,10 +1,10 @@
-# KRagAD
+# GLLS
 
-KRagAD is a Python research codebase for industrial anomaly question answering on MMAD-style datasets. This repository has been cleaned into a standard `src` layout and intentionally keeps one primary batch pipeline plus one visualization UI.
+GLLS is a Python research codebase for industrial anomaly question answering on MMAD-style datasets. This repository has been cleaned into a standard `src` layout and intentionally keeps one primary batch pipeline plus one visualization UI.
 
 ## Repository layout
 
-The active package lives in `src/kragad/`.
+The active Python package still lives in `src/kragad/` for import compatibility.
 
 - `kragad.cli.run` is the main batch entrypoint.
 - `kragad.cli.visualize` is the Gradio inspection UI.
@@ -17,30 +17,30 @@ Large resources are expected outside git under a local data root.
 
 ## Environment
 
-By default, helper scripts use `~/data/kragad` as the external data root. Override any path with environment variables before activation:
+By default, helper scripts use `~/data/GLLS` as the external data root. On machines with an existing `~/data/kragad` layout, the activation script will keep using it when no GLLS data root exists, so no data migration is required. Override any path with environment variables before activation:
 
-- `KRAGAD_DATA_ROOT`
-- `KRAGAD_DATASET_ROOT`
-- `KRAGAD_DATABASE_ROOT`
-- `KRAGAD_SAM3_PATH`
-- `KRAGAD_ADAPTCLIP_ROOT`
-- `KRAGAD_VENV`
+- `GLLS_DATA_ROOT`
+- `GLLS_DATASET_ROOT`
+- `GLLS_DATABASE_ROOT`
+- `GLLS_SAM3_PATH`
+- `GLLS_ADAPTCLIP_ROOT`
+- `GLLS_VENV`
 
 Activate the environment with:
 
 ```bash
-source scripts/dev/activate_kragad.sh
+source scripts/dev/activate_glls.sh
 ```
 
-That script exports the expected `KRAGAD_*` variables, activates `KRAGAD_VENV` when present, and sets `PYTHONPATH` for the package plus the external SAM3 checkout.
+That script exports the expected `GLLS_*` variables, also sets legacy `KRAGAD_*` compatibility aliases, activates `GLLS_VENV` when present, and sets `PYTHONPATH` for the package plus the external SAM3 checkout.
 
 ## Install dependencies
 
 ```bash
-pip install -r requirements-kragad.txt
+pip install -r requirements-glls.txt
 ```
 
-Torch is managed separately on the target machine; see `requirements-kragad.txt` for the expected CUDA wheel notes.
+Torch is managed separately on the target machine; see `requirements-glls.txt` for the expected CUDA wheel notes.
 
 ## Run the main pipeline
 
@@ -86,7 +86,7 @@ The batch pipeline expects MMAD-organized QA data under the shared data root, es
 
 - `DS-MVTec/*/QA.json`
 - `VisA/*/QA.json`
-- graph caches under `.../datasets/KRagAD/databases/graph_index`
+- graph caches under `$GLLS_DATABASE_ROOT/graph_index`
 
 Graph building logic lives in `python -m kragad.rag.build_graph` and uses text knowledge plus reference images to produce `{category}_graph.pkl` files consumed by the RAG agent.
 
@@ -96,4 +96,4 @@ This repository no longer keeps the old ablation, timing, heatmap-sensitivity, a
 
 ## Upgrade notes
 
-Environment-specific paths and private machine notes should stay outside the repository. When adding new entrypoints, prefer the shared `KRAGAD_*` variables and `src/kragad/paths.py` defaults instead of hard-coded absolute paths.
+Environment-specific paths and private machine notes should stay outside the repository. When adding new entrypoints, prefer the shared `GLLS_*` variables and `src/kragad/paths.py` defaults instead of hard-coded absolute paths.

@@ -553,7 +553,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_root", default=os.path.join(kragad_paths.dataset_root(), "DS-MVTec"), help="Dataset root")
     parser.add_argument("--output_dir", default="./results_metrics", help="Log output directory")
     parser.add_argument("--graph_cache_root", default=None,
-                        help="Graph index directory. Defaults to $KRAGAD_DATABASE_ROOT/graph_index.")
+                        help="Graph index directory. Defaults to $GLLS_DATABASE_ROOT/graph_index.")
     parser.add_argument("--subclass", type=str, default="cable", help="cable or bottle")
     parser.add_argument("--gpus", type=str, default="0", help="GPU ID")
     parser.add_argument("--range", type=str, default=None, help="Debug range (e.g., '000-002')")

@@ -7,9 +7,9 @@ from kragad import paths as kragad_paths
 
 # ================= 默认配置 =================
 DEFAULT_CHECKPOINT = kragad_paths.sam3_path()
-KRAGAD_DATABASE_ROOT = kragad_paths.database_root()
-BASE_DATA_DIR = os.path.join(KRAGAD_DATABASE_ROOT, "fig", "VisA")
-OUTPUT_ROOT = os.path.join(KRAGAD_DATABASE_ROOT, "img", "visa")
+GLLS_DATABASE_ROOT = kragad_paths.database_root()
+BASE_DATA_DIR = os.path.join(GLLS_DATABASE_ROOT, "fig", "VisA")
+OUTPUT_ROOT = os.path.join(GLLS_DATABASE_ROOT, "img", "visa")
 
 # ================= 类别策略配置 =================
 CATEGORY_CONFIG = {

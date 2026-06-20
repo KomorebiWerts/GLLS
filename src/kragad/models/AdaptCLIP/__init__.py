@@ -1,4 +1,4 @@
-"""Compatibility exports for KragAD's AdaptCLIP localizer."""
+"""Compatibility exports for GLLS's AdaptCLIP localizer."""
 
 from pathlib import Path
 import sys

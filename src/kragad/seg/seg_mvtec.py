@@ -11,9 +11,9 @@ import cv2
 
 # ================= 默认配置 =================
 DEFAULT_CHECKPOINT = kragad_paths.sam3_path()
-KRAGAD_DATABASE_ROOT = kragad_paths.database_root()
-BASE_DATA_DIR = os.path.join(KRAGAD_DATABASE_ROOT, "fig", "DS_MVTec")
-OUTPUT_ROOT = os.path.join(KRAGAD_DATABASE_ROOT, "img", "mvtec")
+GLLS_DATABASE_ROOT = kragad_paths.database_root()
+BASE_DATA_DIR = os.path.join(GLLS_DATABASE_ROOT, "fig", "DS_MVTec")
+OUTPUT_ROOT = os.path.join(GLLS_DATABASE_ROOT, "img", "mvtec")
 
 # ================= 类别策略配置 =================
 CATEGORY_CONFIG = {

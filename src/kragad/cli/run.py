@@ -818,7 +818,7 @@ if __name__ == "__main__":
     parser.add_argument("--subclass", type=str, default="pcb4")
     parser.add_argument("--output_dir", default="./a_pcb4_qwen3/")
     parser.add_argument("--graph_cache_root", default=None,
-                        help="Graph index directory. Defaults to $KRAGAD_DATABASE_ROOT/graph_index.")
+                        help="Graph index directory. Defaults to $GLLS_DATABASE_ROOT/graph_index.")
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--max_tokens", type=int, default=8192)
     parser.add_argument(

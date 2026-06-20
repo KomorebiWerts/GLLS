@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository purpose
 
-KRagAD is a Python research codebase for agentic industrial anomaly QA on MMAD-style benchmarks. This cleaned repository keeps one primary batch pipeline and one visualization UI, rather than preserving all historical ablation entrypoints.
+GLLS is a Python research codebase for agentic industrial anomaly QA on MMAD-style benchmarks. This cleaned repository keeps one primary batch pipeline and one visualization UI, rather than preserving all historical ablation entrypoints.
 
 ## Current working layout
 
-The active code lives under `src/kragad/` with two entrypoints:
+The active Python package still lives under `src/kragad/` for import compatibility, with two entrypoints:
 
 - `python -m kragad.cli.run` for the main multi-GPU batch pipeline.
 - `python -m kragad.cli.visualize` for the Gradio-based visualization and inspection UI.
@@ -17,36 +17,36 @@ Shell wrappers:
 
 - `bash scripts/run/run_main.sh`
 - `bash scripts/run/run_visualize.sh`
-- `source scripts/dev/activate_kragad.sh`
+- `source scripts/dev/activate_glls.sh`
 
 The repository root is intentionally lightweight. Large datasets, checkpoints, caches, external repos, and outputs are expected under a local data root, not committed into git.
 
 ## Environment and data paths
 
-The default external data root is `~/data/kragad`. Override machine-specific paths with environment variables before activation:
+The default external data root is `~/data/GLLS`. On machines with an existing `~/data/kragad` layout, the activation script will keep using it when no GLLS data root exists, so no data migration is required. Override machine-specific paths with environment variables before activation:
 
-- `KRAGAD_DATA_ROOT`
-- `KRAGAD_DATASET_ROOT`
-- `KRAGAD_QA_ROOT`
-- `KRAGAD_DATABASE_ROOT`
-- `KRAGAD_SAM3_PATH`
-- `KRAGAD_ADAPTCLIP_ROOT`
-- `KRAGAD_VENV`
+- `GLLS_DATA_ROOT`
+- `GLLS_DATASET_ROOT`
+- `GLLS_QA_ROOT`
+- `GLLS_DATABASE_ROOT`
+- `GLLS_SAM3_PATH`
+- `GLLS_ADAPTCLIP_ROOT`
+- `GLLS_VENV`
 
-`scripts/dev/activate_kragad.sh` exports the standard `KRAGAD_*` environment variables, activates `KRAGAD_VENV` when present, and wires `PYTHONPATH` to the package source plus the external SAM3 checkout.
+`scripts/dev/activate_glls.sh` exports the standard `GLLS_*` environment variables, also sets legacy `KRAGAD_*` compatibility aliases, activates `GLLS_VENV` when present, and wires `PYTHONPATH` to the package source plus the external SAM3 checkout.
 
 ## Common commands
 
 Activate the environment first:
 
 ```bash
-source scripts/dev/activate_kragad.sh
+source scripts/dev/activate_glls.sh
 ```
 
 Install runtime dependencies into the active environment:
 
 ```bash
-pip install -r requirements-kragad.txt
+pip install -r requirements-glls.txt
 ```
 
 Run the main pipeline:
@@ -101,4 +101,4 @@ Some legacy helper scripts and notes still exist inside package subdirectories, 
 
 ## Upgrade preparation
 
-Keep environment-specific setup notes outside git. When adding or changing entrypoints, use `src/kragad/paths.py` and the shared `KRAGAD_*` variables instead of hard-coded absolute paths.
+Keep environment-specific setup notes outside git. When adding or changing entrypoints, use `src/kragad/paths.py` and the shared `GLLS_*` variables instead of hard-coded absolute paths.

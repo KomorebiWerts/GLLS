@@ -118,9 +118,9 @@ if __name__ == "__main__":
     parser.add_argument("--category", "-c", type=str, required=False, 
                         help="Specific category to build. If omitted, builds ALL found in text_kb.")
     parser.add_argument("--text_kb_root", type=str, default=None,
-                        help="Root directory that contains dataset folders, e.g. $KRAGAD_DATABASE_ROOT/text_knowledge_weak_agent")
+                        help="Root directory that contains dataset folders, e.g. $GLLS_DATABASE_ROOT/text_knowledge_weak_agent")
     parser.add_argument("--graph_output", type=str, default=None,
-                        help="Output directory for graph pkl files, e.g. $KRAGAD_DATABASE_ROOT/graph_index_weak_agent")
+                        help="Output directory for graph pkl files, e.g. $GLLS_DATABASE_ROOT/graph_index_weak_agent")
     
     args = parser.parse_args()
     target_dataset = args.dataset.lower()
