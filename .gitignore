@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environment and secrets
+.env
+.env.*
+*.env
+.venv/
+venv/
+env/
+
+# Runtime/UI state
+.gradio/
+.agents/
+
+# Large local resources must stay outside the repository
+/datasets
+/databases
+/models
+/external
+/outputs
+
+# Local reference papers
+docs/papers/*.pdf
+
+# Experiment outputs and logs
+experiments/
+results*/
+*_results/
+*_result/
+*_qwen*/
+all_*_qwen*/
+a_*/
+temp_results/
+wrong_samples/
+vllm_cache/
+*.log
+*_errors.json
+*_errors.jsonl
+final_official_format.json
+final_stats_summary.json
+final_report.txt
+heatmap_sensitivity_summary.json
+crop_metrics_summary.json
+heatmap_sensitivity_table.tex
+heatmap_sensitivity_compact.json
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local Claude Code settings
+.claude/

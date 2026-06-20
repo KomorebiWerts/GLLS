@@ -1,0 +1,9 @@
+[project]
+name = "kragad"
+version = "0.1.0"
+description = "KRagAD anomaly QA research pipeline"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
