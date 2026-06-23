@@ -87,13 +87,51 @@ qa_collection/
   VisA/<category>/QA.json
 ```
 
-## Repository Layout
+## 🚀 Quick Start From Zero
+
+The commands below assume Linux, CUDA, and Python 3.10 or newer. The default
+workspace is `~/data/GLLS`; change it once in `scripts/dev/local_paths.sh` if
+your datasets or checkpoints live elsewhere.
+
+```bash
+git clone https://github.com/KomorebiWerts/GLLS.git
+cd GLLS
+
+mkdir -p ~/data/GLLS/envs
+python3 -m venv ~/data/GLLS/envs/GLLS
+source ~/data/GLLS/envs/GLLS/bin/activate
+python -m pip install -U pip
+
+# Install the CUDA build that matches your machine first.
+# Example for CUDA 12.8:
+python -m pip install torch==2.7.1 torchvision==0.22.1 \
+  --index-url https://download.pytorch.org/whl/cu128
+
+python -m pip install -r requirements.txt
+```
+
+Create your local path config:
+
+```bash
+cp scripts/dev/local_paths.example.sh scripts/dev/local_paths.sh
+${EDITOR:-nano} scripts/dev/local_paths.sh
+source scripts/dev/activate_glls.sh
+```
+
+`activate_glls.sh` loads `scripts/dev/local_paths.sh` automatically and then
+sets `PYTHONPATH`, model paths, dataset paths, graph-cache paths, and the Python
+environment used by the helper scripts.
+
+## 📁 Repository Layout
 
 ```text
 GLLS/
-  qa_collection/                 # curated MMAD QA annotations only
+  qa_collection/                 # curated MMAD QA annotations
+  requirements.txt               # public install entrypoint
+  requirements-glls.txt          # pinned GLLS runtime dependencies
   scripts/
-    dev/activate_glls.sh         # local environment and path setup
+    dev/activate_glls.sh         # environment and path setup
+    dev/local_paths.example.sh   # copy to local_paths.sh and edit once
     run/run_main.sh              # DS-MVTec/VisA QA wrapper
     run/run_binary_ad.sh         # MPDD/DTD/DAGM wrapper
     run/run_visualize.sh         # Gradio frontend wrapper
@@ -107,71 +145,26 @@ GLLS/
     seg/                         # SAM3 engine and prompt profiles
 ```
 
-## Environment Setup
+## 🧱 Data and Checkpoint Setup
 
-Create a Python environment at the default location used by the helper scripts:
-
-```bash
-mkdir -p ~/data/GLLS/envs
-python3 -m venv ~/data/GLLS/envs/GLLS
-source ~/data/GLLS/envs/GLLS/bin/activate
-python -m pip install -U pip
-python -m pip install -r requirements-glls.txt
-```
-
-Torch is intentionally not pinned inside `requirements-glls.txt`; install the
-CUDA build that matches your machine first.
-
-Activate GLLS paths:
-
-```bash
-source scripts/dev/activate_glls.sh
-```
-
-Default external root:
-
-```text
-~/data/GLLS
-```
-
-The activation script sets:
-
-```text
-GLLS_DATA_ROOT
-GLLS_DATASET_ROOT
-GLLS_QA_ROOT
-GLLS_DATABASE_ROOT
-GLLS_GRAPH_CACHE_ROOT
-GLLS_VLM_MODEL_PATH
-GLLS_SAM3_PATH
-GLLS_ADAPTCLIP_ROOT
-GLLS_ABOUND_MODEL_PATH
-GLLS_ABOUND_SAVE_PATH
-GLLS_EMBEDDING_MODEL_PATH
-GLLS_MPDD_ROOT
-GLLS_DTD_ROOT
-GLLS_DAGM_ROOT
-GLLS_VENV
-GLLS_PYTHON
-```
-
-Override any of them before activation if your paths differ.
-
-## Dataset Layout
-
-For MMAD-style QA:
+Place MMAD-style QA datasets under the path configured by
+`GLLS_DATASET_ROOT`:
 
 ```text
 $GLLS_DATASET_ROOT/
   DS-MVTec/<category>/...
   VisA/<category>/...
+```
 
+The curated QA annotations are already in this repository:
+
+```text
 $GLLS_QA_ROOT/
   DS-MVTec/<category>/QA.json
   VisA/<category>/QA.json
 ```
 
-For binary AD:
+For binary anomaly detection, configure these optional paths:
 
 ```text
 $GLLS_MPDD_ROOT
@@ -179,61 +172,44 @@ $GLLS_DTD_ROOT          # DTD-Synthetic, not raw Oxford DTD classification
 $GLLS_DAGM_ROOT
 ```
 
-The binary AD CLI supports MVTec-style `train/good` and `test/<defect>` folders,
-DAGM `Train/Test/Label` layouts, and generated `meta.json` split files.
+Recommended model resources:
 
-## Model and Checkpoint Resources
-
-Place model weights and external checkpoints at the configured local paths.
-
-Recommended resources and expected local paths:
-
-| Component | Download source | Expected path |
+| Component | Source | Configure as |
 | --- | --- | --- |
-| VLM | [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) or another compatible Qwen/LLaVA local model | `$GLLS_VLM_MODEL_PATH` |
-| SAM3 | [facebookresearch/sam3](https://github.com/facebookresearch/sam3) checkpoint links | `$GLLS_SAM3_PATH` |
-| CLIP backbone | [openai/clip-vit-large-patch14-336](https://huggingface.co/openai/clip-vit-large-patch14-336) or OpenCLIP-compatible ViT-L/14@336px weights | downloaded/cached by the localizer |
-| AdaptCLIP | [gaobb/AdaptCLIP](https://github.com/gaobb/AdaptCLIP) adapter checkpoints | `$GLLS_ADAPTCLIP_ROOT/checkpoints/<domain>_epoch_15.pth` |
-| ABounD (optional) | author-provided or locally trained ABounD checkpoint | `$GLLS_ABOUND_MODEL_PATH/<k>shot.pt` and `$GLLS_ABOUND_SAVE_PATH/<dataset>/...` |
-| Text embedding model | [BAAI/bge-base-en-v1.5](https://huggingface.co/BAAI/bge-base-en-v1.5) | `$GLLS_EMBEDDING_MODEL_PATH` |
+| VLM | [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) or another compatible Qwen/LLaVA local model | `GLLS_VLM_MODEL_PATH` |
+| SAM3 | [facebookresearch/sam3](https://github.com/facebookresearch/sam3) checkpoint links | `GLLS_SAM3_PATH` |
+| SAM3 code | [facebookresearch/sam3](https://github.com/facebookresearch/sam3) | `GLLS_DATA_ROOT/external/sam3` on `PYTHONPATH` |
+| CLIP backbone | [openai/clip-vit-large-patch14-336](https://huggingface.co/openai/clip-vit-large-patch14-336) or OpenCLIP-compatible ViT-L/14@336px weights | downloaded/cached by localizer |
+| AdaptCLIP | [gaobb/AdaptCLIP](https://github.com/gaobb/AdaptCLIP) adapter checkpoints | `GLLS_ADAPTCLIP_ROOT/checkpoints/<domain>_epoch_15.pth` |
+| Text embedding | [BAAI/bge-base-en-v1.5](https://huggingface.co/BAAI/bge-base-en-v1.5) | `GLLS_EMBEDDING_MODEL_PATH` |
+| ABounD optional | author-provided or locally trained ABounD checkpoint | `GLLS_ABOUND_MODEL_PATH` / `GLLS_ABOUND_SAVE_PATH` |
 
-The public default is AdaptCLIP 1-shot local evidence plus MCTS/SAM3/PVLA.
-ABounD source code is retained for explicit local runs; if using it, put local
-checkpoints under the configured ABounD paths.
+The public default path is AdaptCLIP 1-shot local evidence with MCTS, SAM3, and
+PVLA/RAG. ABounD source is retained for explicit local runs.
 
-SAM3 also needs the official SAM3 Python package/repository on `PYTHONPATH`; the
-activation script expects it at:
+## 🧩 Build PVLA Graph Knowledge
 
-```text
-$GLLS_DATA_ROOT/external/sam3
-```
-
-## Build PVLA Graph Knowledge
-
-Graph caches are read from:
-
-```text
-$GLLS_GRAPH_CACHE_ROOT
-```
-
-Build or rebuild graph caches from text knowledge and visual references with:
+PVLA graph caches are read from `GLLS_GRAPH_CACHE_ROOT`.
 
 ```bash
+source scripts/dev/activate_glls.sh
 python -m glls.rag.build_graph
 ```
 
-The CLI reads generated graph files from that directory.
+Run this after your text knowledge and normal-reference assets are placed under
+the configured database root. The QA and binary-AD entrypoints will then retrieve
+source-backed graph blocks from `GLLS_GRAPH_CACHE_ROOT`.
 
-## Run DS-MVTec / VisA QA
+## 🧪 Run DS-MVTec / VisA QA
 
-Quick help:
+Check the available options:
 
 ```bash
 python -m glls.cli.run --help
 bash scripts/run/run_main.sh --help
 ```
 
-Example:
+Run one DS-MVTec category:
 
 ```bash
 source scripts/dev/activate_glls.sh
@@ -251,26 +227,70 @@ python -m glls.cli.run \
   --output_dir outputs/mvtec_bottle
 ```
 
-To switch to VisA, use the VisA dataset/category and the VisA AdaptCLIP
-checkpoint domain:
+Run one VisA category:
 
 ```bash
+source scripts/dev/activate_glls.sh
 python -m glls.cli.run \
   --dataset visa \
   --subclass candle \
+  --dataset_root "$GLLS_DATASET_ROOT" \
+  --qa_root "$GLLS_QA_ROOT" \
+  --graph_cache_root "$GLLS_GRAPH_CACHE_ROOT" \
+  --model_path "$GLLS_VLM_MODEL_PATH" \
+  --sam_path "$GLLS_SAM3_PATH" \
   --localizer adaptclip \
   --k_shot 1 \
   --adaptclip_checkpoint_domain visa \
-  --dataset_root "$GLLS_DATASET_ROOT" \
-  --qa_root "$GLLS_QA_ROOT" \
   --output_dir outputs/visa_candle
 ```
 
-Outputs include per-question predictions and compact method traces showing
-heatmap evidence, MCTS actions, SAM3 refinement, PVLA/RAG provenance, and final
-answer parsing.
+Each result row includes prediction, answer parsing, heatmap evidence, MCTS
+action trace, SAM3 refinement audit, PVLA/RAG provenance, and final prompt
+evidence.
 
-## Run MPDD / DTD / DAGM Binary AD
+## 🖥️ Run the Online Frontend
+
+```bash
+source scripts/dev/activate_glls.sh
+bash scripts/run/run_visualize.sh --host 127.0.0.1 --port 7861
+```
+
+Open:
+
+```text
+http://127.0.0.1:7861
+```
+
+The frontend is designed for method playback rather than raw path debugging:
+
+1. Initialize the runtime from your local path config.
+2. Choose dataset, category, task, and QA row.
+3. Run GLLS and inspect the two-stage evidence flow: Phase-1 global report,
+   small-model heatmap proposals, MCTS crop search, SAM3 structural cut/gate,
+   source-backed PVLA/RAG recall, and Phase-2 answer fusion.
+
+<p align="center">
+  <img src="docs/assets/frontend/frontend_sample.png" alt="GLLS frontend sample selection" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/assets/frontend/frontend_process_top.png" alt="GLLS frontend method playback top" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/assets/frontend/frontend_process_bottom.png" alt="GLLS frontend method playback bottom" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/assets/frontend/frontend_evidence.png" alt="GLLS frontend heatmap SAM3 local evidence and PVLA panels" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/assets/frontend/frontend_trace.png" alt="GLLS frontend prompt evidence trace" width="900">
+</p>
+
+## ⚙️ Run MPDD / DTD / DAGM Binary AD
 
 Prepare dataset metadata and offline normal-reference PVLA/SAM3 assets:
 
@@ -286,7 +306,7 @@ Run the evaluator:
 python -m glls.cli.binary_ad --dataset all --output_dir outputs/binary_ad
 ```
 
-or use:
+or:
 
 ```bash
 bash scripts/run/run_binary_ad.sh
@@ -295,27 +315,3 @@ bash scripts/run/run_binary_ad.sh
 The binary AD path keeps the same method structure: localizer heatmap scoring,
 MCTS-style region selection, SAM3 region refinement, and PVLA normal-reference
 knowledge.
-
-## Run the Online Frontend
-
-```bash
-source scripts/dev/activate_glls.sh
-bash scripts/run/run_visualize.sh --host 127.0.0.1 --port 7861
-```
-
-Then open:
-
-```text
-http://127.0.0.1:7861
-```
-
-The frontend exposes the same path configuration fields as the CLI. After
-loading a dataset/category, each QA row can be run online and inspected with:
-
-- original image, question, options, prediction, and ground truth;
-- global heatmap;
-- selected local crops;
-- SAM3 refinement artifacts;
-- PVLA/RAG source-backed knowledge blocks;
-- MCTS/SAM3/RAG method trace;
-- exportable run bundle.

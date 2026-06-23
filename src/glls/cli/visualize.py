@@ -12,6 +12,7 @@ import tempfile
 import base64
 import zipfile
 import re
+import html
 from datetime import datetime
 from io import BytesIO
 from collections import defaultdict
@@ -605,8 +606,7 @@ class DatasetManager:
             self.task_type_choices = sorted(list(task_types))
             
             return (
-                f"[{self.dataset_name.upper()}] {category} loaded: {len(self.all_samples)} QA rows | "
-                f"data={final_root} | qa={final_qa_root}"
+                f"[{self.dataset_name.upper()}] {category} loaded: {len(self.all_samples)} QA rows"
             )
         except Exception as e:
             import traceback
@@ -933,7 +933,7 @@ class GlobalSystem:
             vllm_status = f"ON (Util: {gpu_util})" if (use_vllm and self.vlm.use_vllm) else "OFF"
             return (
                 f"System ready | GPU:{gpu_id} | Model:{model_type} | vLLM:{vllm_status} | "
-                f"Dataset:{dataset_name} | Localizer:AdaptCLIP | QA:{qa_root}"
+                f"Dataset:{dataset_name} | Localizer:AdaptCLIP | QA:curated"
             )
         except Exception as e:
             import traceback
@@ -1002,6 +1002,22 @@ def _compact_json(value, max_chars=900):
         return text[:max_chars].rstrip() + "\n..."
     return text
 
+def _short_text(value, max_chars=180):
+    text = _as_text(value).strip()
+    if len(text) > max_chars:
+        return text[:max_chars].rstrip() + "..."
+    return text
+
+def _source_label(path_value):
+    text = _as_text(path_value)
+    if not text:
+        return ""
+    normalized = text.replace("\\", "/")
+    for marker in ("/graph_index/", "/text_knowledge/"):
+        if marker in normalized:
+            return normalized.split(marker, 1)[1]
+    return os.path.basename(normalized) or normalized
+
 def _method_trace_markdown(debug_meta):
     debug_meta = debug_meta or {}
     participation = summarize_method_participation(debug_meta)
@@ -1040,10 +1056,258 @@ def _method_trace_markdown(debug_meta):
     if mcts_search:
         lines.append(f"- Search summary: `{_compact_json(mcts_search, 280)}`")
     if graph_paths:
-        lines.append(f"- Graph cache: `{graph_paths[0]}`" + (f" plus {len(graph_paths) - 1} more" if len(graph_paths) > 1 else ""))
+        lines.append(f"- Graph cache: `{_source_label(graph_paths[0])}`" + (f" plus {len(graph_paths) - 1} more" if len(graph_paths) > 1 else ""))
     if text_paths:
-        lines.append(f"- Text knowledge: `{text_paths[0]}`" + (f" plus {len(text_paths) - 1} more" if len(text_paths) > 1 else ""))
+        lines.append(f"- Text knowledge: `{_source_label(text_paths[0])}`" + (f" plus {len(text_paths) - 1} more" if len(text_paths) > 1 else ""))
     return "\n".join(lines)
+
+def _first_items(values, limit=4):
+    items = []
+    for value in values or []:
+        if value not in items:
+            items.append(value)
+        if len(items) >= limit:
+            break
+    return items
+
+def _html(value):
+    return html.escape(_as_text(value), quote=True)
+
+def _display_status(value):
+    return _as_text(value).replace("_", " ")
+
+def _top_count_text(counts, limit=4):
+    if not isinstance(counts, dict) or not counts:
+        return "none"
+    pairs = sorted(counts.items(), key=lambda item: item[1], reverse=True)[:limit]
+    return ", ".join(f"{key} x{value}" for key, value in pairs)
+
+def _metric_html(label, value, tone=""):
+    tone_class = f" {tone}" if tone else ""
+    return (
+        f'<div class="method-kpi{tone_class}">'
+        f"<span>{_html(label)}</span><strong>{_html(value)}</strong>"
+        "</div>"
+    )
+
+def _item_list_html(items, empty_text):
+    rows = [f"<li>{item}</li>" for item in items if item]
+    if not rows:
+        rows = [f"<li>{_html(empty_text)}</li>"]
+    return "<ul>" + "".join(rows) + "</ul>"
+
+def _method_process_placeholder():
+    stages = [
+        ("01", "Phase-1 Global Logic", "Original image + QA are inspected first to form a global structural report."),
+        ("02", "Small Localizer + MCTS", "AdaptCLIP heatmap proposals drive MCTS region search and crop selection."),
+        ("03", "SAM3 Structural Gate", "Category prompts and mask quality checks refine reliable structural cutouts."),
+        ("04", "PVLA / RAG Recall", "Graph cache, text knowledge, and visual references are retrieved with source provenance."),
+        ("05", "Phase-2 Fusion", "Global report, local crops, SAM3 evidence, and PVLA blocks are fused for the final answer."),
+    ]
+    cards = []
+    for step, title, body in stages:
+        cards.append(
+            '<article class="method-stage muted">'
+            f'<div class="stage-head"><span>{step}</span><h4>{_html(title)}</h4></div>'
+            f"<p>{_html(body)}</p>"
+            "</article>"
+        )
+    return (
+        '<div class="method-process-card">'
+        '<div class="process-head"><div><p class="eyebrow">Method playback</p>'
+        '<h3>Run a QA row to replay the GLLS evidence flow</h3></div>'
+        '<span class="process-badge">Waiting</span></div>'
+        '<div class="method-stage-grid">' + "".join(cards) + "</div>"
+        "</div>"
+    )
+
+def _method_process_html(debug_meta, final_prompt=""):
+    debug_meta = debug_meta or {}
+    participation = summarize_method_participation(debug_meta)
+    mcts_budget = debug_meta.get("mcts_budget_config", {}) or {}
+    mcts_search = debug_meta.get("mcts_search_summary", {}) or {}
+    crop_audit = debug_meta.get("crop_evidence_audit", []) or []
+    sam_attempts = debug_meta.get("sam_text_prompt_attempts", []) or []
+    sam_prompt_audit = debug_meta.get("sam_prompt_selection_audit", []) or []
+    sam_hits = debug_meta.get("sam_text_prompt_hits", []) or []
+    sam_scores = debug_meta.get("sam_mask_scores", []) or []
+    rag_blocks = debug_meta.get("rag_block_provenance", []) or []
+    rag_summary = participation.get("rag_source_backed_summary", {}) or {}
+
+    crop_items = []
+    for item in crop_audit[:4]:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label") or item.get("source") or "crop"
+        source = item.get("source", "unknown")
+        reason = item.get("reason") or item.get("status") or ""
+        score = item.get("heatmap_score", item.get("sam_score", ""))
+        score_text = f", score={float(score):.3f}" if isinstance(score, (int, float)) else ""
+        crop_items.append(
+            f"<b>{_html(label)}</b> from <code>{_html(source)}</code> "
+            f"<span>({_html(reason)}{_html(score_text)})</span>"
+        )
+
+    prompt_items = []
+    prompt_source = sam_prompt_audit if sam_prompt_audit else sam_attempts
+    for item in prompt_source[:5]:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role", "prompt")
+        text = item.get("text", "")
+        status = item.get("status", "attempted")
+        reason = item.get("reason") or item.get("selection_reason") or item.get("source", "")
+        prompt_items.append(
+            f"<code>{_html(_display_status(role))}</code> {_html(text or 'box/ROI prompt')} "
+            f"<span>-> {_html(_display_status(status))}{(' / ' + _html(_display_status(reason))) if reason else ''}</span>"
+        )
+
+    rag_regions = []
+    graph_sources = []
+    text_sources = []
+    for block in rag_blocks:
+        if not isinstance(block, dict):
+            continue
+        region = block.get("region")
+        if region:
+            rag_regions.append(str(region))
+        graph_path = block.get("graph_cache_path")
+        if graph_path:
+            graph_sources.append(_source_label(graph_path))
+        text_path = block.get("source_json_path")
+        if text_path:
+            text_sources.append(_source_label(text_path))
+
+    phase_report = _as_text(debug_meta.get("phase_1_result")).strip() or "No Phase-1 report recorded."
+    prompt_crop_labels = debug_meta.get("prompt_crop_labels", []) or []
+    final_prompt_note = "built and sent" if final_prompt else "not generated yet"
+    task_policy = debug_meta.get("task_policy", {}) or {}
+    if isinstance(task_policy, dict):
+        policy_bits = []
+        for key, label in [
+            ("use_local_anomaly_stream", "local anomaly stream"),
+            ("use_mcts_search", "MCTS search"),
+            ("use_sam3_local_refinement", "SAM3 refinement"),
+            ("show_phase1_report_in_final_prompt", "Phase-1 report in Phase-2"),
+            ("show_rag_blocks_in_final_prompt", "PVLA/RAG in Phase-2"),
+        ]:
+            if task_policy.get(key):
+                policy_bits.append(label)
+        phase1_role = _display_status(task_policy.get("phase1_logic_role") or "standard")
+        policy_text = f"{', '.join(policy_bits) or 'global-only'}; phase1 role={phase1_role}"
+    else:
+        policy_text = _short_text(task_policy, 160) or "standard"
+
+    mcts_actions = len(debug_meta.get("mcts_action_trace", []) or [])
+    if isinstance(mcts_budget, dict) and mcts_budget:
+        mcts_budget_text = (
+            f"{mcts_budget.get('n_simulations', '?')} sims, depth "
+            f"{mcts_budget.get('max_depth', '?')}, actions {mcts_budget.get('action_count', '?')}"
+        )
+    else:
+        mcts_budget_text = _compact_json(mcts_budget, 120) or "not recorded"
+    heatmap_score = debug_meta.get("heatmap_score", debug_meta.get("heatmap_peak_score", 0))
+    threshold = debug_meta.get("threshold_used", debug_meta.get("anomaly_threshold", 0))
+    selected_regions = []
+    prompt_rag_audit = debug_meta.get("prompt_rag_selection_audit", {}) or {}
+    if isinstance(prompt_rag_audit, dict):
+        selected_regions.extend(prompt_rag_audit.get("selected_regions", []) or [])
+    selected_regions.extend(rag_regions)
+    sam_veto = debug_meta.get("sam3_normal_part_veto", {}) or {}
+    if isinstance(sam_veto, dict) and sam_veto.get("status"):
+        sam_gate = f"normal-part veto {_display_status(sam_veto.get('status'))}"
+    elif int(debug_meta.get("sam_refined_crop_count", 0) or 0) > 0:
+        sam_gate = f"{debug_meta.get('sam_refined_crop_count')} accepted refined crop(s)"
+    elif sam_scores:
+        sam_gate = "mask audited; no refined crop selected"
+    else:
+        sam_gate = "not needed for this task/category"
+
+    summary = (
+        _metric_html("MCTS", f"{_display_status(participation.get('mcts_participation_status', 'unknown'))} / {mcts_actions} actions", "signal")
+        + _metric_html("SAM3", f"{_display_status(participation.get('sam_participation_status', 'unknown'))} / {len(sam_scores)} masks", "builder")
+        + _metric_html("PVLA", f"{rag_summary.get('block_count', len(rag_blocks))} blocks", "pass")
+        + _metric_html("Phase-2", final_prompt_note, "")
+    )
+
+    stage_1 = (
+        '<article class="method-stage phase-global">'
+        '<div class="stage-head"><span>01</span><h4>Phase-1 Global Logic Report</h4></div>'
+        '<p>The first VLM pass reads the whole image and QA/options, then records a global structural report. '
+        'It is kept as context for Phase-2 instead of replacing local evidence.</p>'
+        + _item_list_html([
+            f"Global report: <code>{_html(phase_report)}</code>",
+            f"Policy gates: <code>{_html(policy_text)}</code>",
+            f"Logic role: <code>{_html('global structural anchor' if not debug_meta.get('used_logic_engine') else 'logic engine active')}</code>",
+        ], "No Phase-1 trace was recorded.")
+        + "</article>"
+    )
+
+    stage_2 = (
+        '<article class="method-stage phase-local">'
+        '<div class="stage-head"><span>02</span><h4>Small Localizer + MCTS Crop Search</h4></div>'
+        '<p>The small localizer supplies anomaly heatmap proposals. MCTS searches those proposals and keeps only compact local evidence for the final prompt.</p>'
+        + _item_list_html([
+            f"Localizer: <code>{_html(debug_meta.get('threshold_source', 'unknown'))}</code>, score <code>{_html(heatmap_score)}</code>, threshold <code>{_html(threshold)}</code>",
+            f"Proposals: <code>{_html(debug_meta.get('region_proposal_count', 0))}</code>, selected crops <code>{_html(debug_meta.get('crop_count', 0))}</code>, prompt-visible <code>{_html(debug_meta.get('prompt_visible_crop_count', 0))}</code>",
+            f"MCTS budget: <code>{_html(mcts_budget_text)}</code>; action trace <code>{_html(mcts_actions)}</code>",
+            f"Top actions: <code>{_html(_top_count_text((mcts_search or {}).get('expanded_action_counts', {})))}</code>",
+            *crop_items,
+        ], "No local crop was selected for this question.")
+        + "</article>"
+    )
+
+    stage_3 = (
+        '<article class="method-stage phase-sam">'
+        '<div class="stage-head"><span>03</span><h4>SAM3 Structural Cut and Logic Gate</h4></div>'
+        '<p>SAM3 is used when structural segmentation can improve local evidence. Prompt candidates are audited, masks are quality checked, and accepted masks become crop evidence.</p>'
+        + _item_list_html([
+            f"SAM3 status: <code>{_html(_display_status(participation.get('sam_participation_status', 'unknown')))}</code>",
+            f"Structural gate: <code>{_html(sam_gate)}</code>",
+            f"Mask scores: <code>{_html(_compact_json(sam_scores[:6], 160))}</code>",
+            f"Artifact rule: <code>{_html(_short_text(debug_meta.get('sam3_crop_artifact_rule', 'not recorded'), 140))}</code>",
+            *prompt_items,
+        ], "No SAM3 prompt or mask audit was needed.")
+        + "</article>"
+    )
+
+    stage_4 = (
+        '<article class="method-stage phase-pvla">'
+        '<div class="stage-head"><span>04</span><h4>PVLA / RAG Multimodal Knowledge</h4></div>'
+        '<p>PVLA keeps the graph-shaped hierarchy visible: region-level text knowledge, graph cache provenance, and normal/reference visual cutouts are recalled before Phase-2.</p>'
+        + _item_list_html([
+            f"Retrieved blocks: <code>{_html(rag_summary.get('block_count', len(rag_blocks)))}</code>, graph sources <code>{_html(rag_summary.get('graph_cache_path_count', len(set(graph_sources))))}</code>, text sources <code>{_html(rag_summary.get('source_json_path_count', len(set(text_sources))))}</code>",
+            f"Visual references: <code>{_html(rag_summary.get('visual_reference_source_backed_count', 0))}</code> source-backed cutout(s)",
+            f"Selected regions: <code>{_html(', '.join(_first_items(selected_regions, 6)) or 'none')}</code>",
+            f"Graph caches: <code>{_html(', '.join(_first_items(graph_sources, 3)) or 'none')}</code>",
+            f"Text knowledge: <code>{_html(', '.join(_first_items(text_sources, 3)) or 'none')}</code>",
+        ], "No PVLA/RAG block was selected.")
+        + "</article>"
+    )
+
+    stage_5 = (
+        '<article class="method-stage phase-final">'
+        '<div class="stage-head"><span>05</span><h4>Phase-2 Evidence Fusion</h4></div>'
+        '<p>The final VLM answer sees the original image plus the selected method evidence, then emits a constrained multiple-choice answer.</p>'
+        + _item_list_html([
+            f"Prompt crops: <code>{_html(', '.join(prompt_crop_labels) or 'none')}</code>",
+            f"PVLA blocks in prompt: <code>{_html(len(debug_meta.get('prompt_rag_text_blocks', []) or []))}</code>",
+            f"Final prompt: <code>{_html(final_prompt_note)}</code>",
+            f"Verification strategy: <code>{_html(debug_meta.get('verification_strategy', 'standard'))}</code>",
+        ], "Phase-2 prompt has not been generated.")
+        + "</article>"
+    )
+
+    return (
+        '<div class="method-process-card">'
+        '<div class="process-head"><div><p class="eyebrow">Method playback</p>'
+        '<h3>GLLS evidence flow for this QA</h3>'
+        '<p>Each stage below is rendered from the run trace, so it shows what the method actually searched, cut, recalled, and sent to Phase-2.</p>'
+        '</div><span class="process-badge">Trace-backed</span></div>'
+        '<div class="method-kpi-grid">' + summary + "</div>"
+        '<div class="method-stage-grid">' + stage_1 + stage_2 + stage_3 + stage_4 + stage_5 + "</div>"
+        "</div>"
+    )
 
 def _final_result_markdown(question, options, pred_key, gt_key, is_correct, final_response, debug_meta, ad_override):
     options = options or {}
@@ -1092,10 +1356,10 @@ def _final_result_markdown(question, options, pred_key, gt_key, is_correct, fina
 
 async def run_analysis_stream(image, question, subclass, task_type, options, ground_truth=None, override_rag_text=None, override_rag_files=None):
     if not global_sys.is_initialized:
-        yield None, "", None, None, None, "System not initialized.", "", "", None, None, None, ""
+        yield None, "", None, None, None, "System not initialized.", "", "", None, None, None, "", _method_process_placeholder()
         return
     if image is None or not question:
-        yield None, "", None, None, None, "No QA sample selected.", "", "", None, None, None, ""
+        yield None, "", None, None, None, "No QA sample selected.", "", "", None, None, None, "", _method_process_placeholder()
         return
     
     # Debug Options Passing
@@ -1186,7 +1450,7 @@ async def run_analysis_stream(image, question, subclass, task_type, options, gro
         state["log"] += f"\nAdaptCLIP support: {len(support_paths)} normal reference image(s)."
 
     # Yield 1: Init
-    yield rag_file_paths, rag_text_content, None, None, None, state["log"], "", "", None, None, None, ""
+    yield rag_file_paths, rag_text_content, None, None, None, state["log"], "", "", None, None, None, "", _method_process_placeholder()
 
     async def callback(key, value):
         if key == "heatmap": state["heatmap"] = value
@@ -1199,7 +1463,7 @@ async def run_analysis_stream(image, question, subclass, task_type, options, gro
         
         while not mcts_task.done():
             await asyncio.sleep(0.1)
-            yield rag_file_paths, rag_text_content, state["heatmap"], None, None, state["log"], "", "", None, None, None, ""
+            yield rag_file_paths, rag_text_content, state["heatmap"], None, None, state["log"], "", "", None, None, None, "", _method_process_placeholder()
         
         result = await mcts_task
         
@@ -1264,6 +1528,7 @@ async def run_analysis_stream(image, question, subclass, task_type, options, gro
             debug_meta,
             ad_override,
         )
+        method_process_md = _method_process_html(debug_meta, final_prompt)
         state["log"] += (
             "\nAnalysis complete."
             f"\nPrediction: {pred_key or 'N/A'} | GT: {gt_key or 'N/A'} | Result: "
@@ -1282,12 +1547,13 @@ async def run_analysis_stream(image, question, subclass, task_type, options, gro
             result.get("red_box_image"), 
             crop_file_paths,
             debug_view_img,
-            formatted_prompt
+            formatted_prompt,
+            method_process_md
         )
     except Exception as e:
         import traceback
         traceback.print_exc()
-        yield rag_file_paths, rag_text_content, state["heatmap"], None, None, f"Error: {str(e)}", "", "", None, None, None, ""
+        yield rag_file_paths, rag_text_content, state["heatmap"], None, None, f"Error: {str(e)}", "", "", None, None, None, "", f"<div class='method-process-card'><h3>Method run failed</h3><p>{_html(str(e))}</p></div>"
 
 # Wrapper for Gradio Generator
 def search_runner_wrapper(img, q, sub, task, opts, gt=None, man_txt=None, man_files=None):
@@ -1303,47 +1569,6 @@ def search_runner_wrapper(img, q, sub, task, opts, gt=None, man_txt=None, man_fi
     except StopAsyncIteration: pass
     finally: loop.close()
 
-# Phase 2 Only Rerun
-def run_manual_inference_phase2(rag_file_objs, rag_text, prompt, state_red_box, focus_file_objs):
-    if not global_sys.vlm: return "System not initialized.", ""
-    content_list = [{"type": "text", "text": "## MANUAL REFINEMENT MODE (PHASE 2) ##\n"}]
-    
-    if rag_file_objs:
-        content_list.append({"type": "text", "text": "=== VISUAL CRITERIA ===\n"})
-        for item in rag_file_objs:
-            path = None
-            if isinstance(item, (list, tuple)) and len(item) > 0: path = item[0]
-            elif isinstance(item, dict): path = item.get('name') or item.get('path')
-            elif hasattr(item, 'name'): path = item.name
-            elif isinstance(item, str): path = item
-            
-            if path and os.path.exists(path):
-                content_list.append({"type": "image", "image": Image.open(path).convert("RGB")})
-    
-    content_list.append({"type": "text", "text": f"\n=== TEXT RULES ===\n{rag_text}\n"})
-    
-    if focus_file_objs:
-        content_list.append({"type": "text", "text": "\n=== TARGET VIEWS (MANUAL/SAM3) ===\n"})
-        for i, item in enumerate(focus_file_objs):
-            path = None
-            if isinstance(item, (list, tuple)) and len(item) > 0: path = item[0]
-            elif isinstance(item, dict): path = item.get('name') or item.get('path')
-            elif hasattr(item, 'name'): path = item.name
-            elif isinstance(item, str): path = item
-
-            if path and os.path.exists(path):
-                content_list.append({"type": "text", "text": f"Inspection View {i+1}:\n"})
-                content_list.append({"type": "image", "image": Image.open(path).convert("RGB")})
-    elif state_red_box:
-        content_list.append({"type": "image", "image": state_red_box})
-        
-    content_list.append({"type": "text", "text": f"\n--- INSTRUCTION ---\n{prompt}"})
-    
-    try:
-        res = global_sys.vlm.generate(content_list)
-        return res, "Phase 2 rerun succeeded."
-    except Exception as e: return f"Failed: {e}", f"Error: {e}"
-
 # ==========================================
 # 6. Gradio UI
 # ==========================================
@@ -1358,11 +1583,15 @@ CSS = """
     --muted: #5A6675;
     --signal: #3452C7;
     --signal-hover: #2A43A8;
+    --signal-subtle: #EEF1FB;
     --builder: #B0640F;
+    --builder-subtle: #F8EFE4;
     --pass: #0F7A4D;
+    --pass-subtle: #EAF6F0;
     --danger: #C0392B;
     --radius-sm: 6px;
-    --radius-md: 8px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
     --shadow-sm: 0 1px 2px rgba(27, 34, 48, 0.05), 0 1px 3px rgba(27, 34, 48, 0.04);
     --shadow-md: 0 4px 12px rgba(27, 34, 48, 0.08), 0 2px 4px rgba(27, 34, 48, 0.05);
 }
@@ -1377,86 +1606,177 @@ html, body, .gradio-container {
     max-width: none !important;
 }
 .gradio-container .contain {
-    max-width: 1840px !important;
+    max-width: 1560px !important;
 }
-.header-bar {
+.app-topbar {
     position: sticky;
     top: 0;
     z-index: 20;
+    margin: -16px -16px 0;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--rule);
     background: rgba(247, 248, 250, 0.94);
     backdrop-filter: blur(16px);
-    border-bottom: 1px solid var(--rule);
-    padding: 18px 28px;
-    margin: -16px -16px 26px;
 }
-.header-bar h1 {
-    color: var(--ink) !important;
-    font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
-    font-weight: 800;
-    font-size: clamp(2.1rem, 5vw, 4.6rem);
-    line-height: 0.98;
-    letter-spacing: 0;
-    margin: 0;
+.brand-block {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
-.header-bar p {
-    color: var(--muted) !important;
-    font-size: 1.02rem;
-    margin: 12px 0 0;
-    max-width: 980px;
-}
-.header-bar:before {
-    content: "";
-    display: block;
+.brand-mark {
     width: 13px;
-    min-height: 72px;
+    min-height: 42px;
     border-radius: 999px;
     background: linear-gradient(var(--signal), var(--builder) 52%, var(--pass));
     box-shadow: inset 0 0 0 1px rgba(31, 35, 40, 0.16);
-    margin-right: 16px;
 }
-.desk-image-upload .upload-button, .desk-image-upload .flex.flex-col, .desk-image-upload svg { 
-    color: var(--signal) !important; fill: var(--signal) !important; 
+.brand-copy strong {
+    display: block;
+    font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
+    font-size: 22px;
+    line-height: 1.05;
 }
-.desk-image-upload .gr-box { border-color: var(--signal) !important; }
+.brand-copy small,
+.hero-copy,
+.section-copy,
+.muted-note {
+    color: var(--muted);
+}
+.status-chip textarea,
+.status-chip input {
+    min-height: 36px !important;
+    border-radius: 999px !important;
+    border: 1px solid var(--rule) !important;
+    background: var(--panel) !important;
+    color: var(--ink) !important;
+    font-size: 0.86rem !important;
+}
+.hero-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+    gap: 18px;
+    align-items: end;
+    margin: 18px 0 14px;
+    padding: 18px 20px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+    box-shadow: var(--shadow-sm);
+}
+.hero-panel h1 {
+    margin: 4px 0 8px;
+    color: var(--ink);
+    font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
+    font-size: clamp(1.9rem, 3.4vw, 3.1rem);
+    line-height: 1.02;
+    letter-spacing: 0;
+}
+.eyebrow {
+    color: var(--muted);
+    font-size: 0.78rem;
+    letter-spacing: 0;
+    text-transform: uppercase;
+}
+.hero-metrics {
+    display: grid;
+    gap: 8px;
+}
+.hero-metrics span {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 8px 12px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-md);
+    background: var(--panel-raised);
+}
+.hero-metrics b {
+    color: var(--signal);
+}
 .custom-card {
     background: var(--panel);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     padding: 18px;
     border: 1px solid var(--rule);
     box-shadow: var(--shadow-sm);
 }
+.custom-card.tight {
+    padding: 14px;
+}
 .section-title {
     color: var(--ink);
     font-weight: 800;
-    font-size: 1.15rem;
+    font-size: 1.08rem;
     border-left: 4px solid var(--signal);
     padding-left: 12px;
-    margin-bottom: 14px;
+    margin-bottom: 8px;
 }
 .section-title-sm {
     color: var(--ink);
-    font-weight: 700;
-    font-size: 1rem;
-    margin-bottom: 10px;
+    font-weight: 800;
+    font-size: 0.98rem;
+    margin-bottom: 8px;
 }
+.section-copy {
+    margin: 0 0 12px;
+    font-size: 0.92rem;
+}
+.method-strip {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+}
+.method-strip span {
+    min-height: 42px;
+    padding: 8px 10px;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    background: var(--panel-raised);
+    color: var(--ink);
+    font-size: 0.86rem;
+    font-weight: 700;
+    text-align: center;
+}
+.method-strip span:nth-child(1) { background: var(--signal-subtle); color: var(--signal); }
+.method-strip span:nth-child(2) { background: var(--builder-subtle); color: var(--builder); }
+.method-strip span:nth-child(3) { background: var(--pass-subtle); color: var(--pass); }
+.method-strip span:nth-child(4) { background: #F2F4F7; }
+.method-strip span:nth-child(5) { background: #F7F1EA; color: var(--builder); }
 .desk-btn-primary {
     background: var(--signal) !important;
     color: white !important;
     font-weight: 800 !important;
-    border-radius: var(--radius-sm) !important;
+    border-radius: var(--radius-md) !important;
     border: 1px solid var(--signal-hover) !important;
-    box-shadow: var(--shadow-sm) !important;
+    box-shadow: 0 1px 2px rgba(52, 82, 199, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
 }
 .desk-btn-primary:hover {
     background: var(--signal-hover) !important;
 }
+.desk-btn-secondary {
+    background: var(--panel) !important;
+    color: var(--ink) !important;
+    font-weight: 700 !important;
+    border: 1px solid var(--rule) !important;
+    border-radius: var(--radius-md) !important;
+}
 .gradio-container button {
-    border-radius: var(--radius-sm) !important;
+    border-radius: var(--radius-md) !important;
 }
 .gradio-container input,
 .gradio-container textarea,
 .gradio-container select {
     border-radius: var(--radius-sm) !important;
+}
+.gradio-container label,
+.gradio-container .label-wrap span {
+    color: var(--muted) !important;
+    font-weight: 700 !important;
+}
+.desk-image-upload,
+.evidence-image {
+    border-radius: var(--radius-md);
+    overflow: hidden;
 }
 .log-box textarea {
     background: #1B2230 !important;
@@ -1469,16 +1789,174 @@ html, body, .gradio-container {
     border: 1px solid var(--rule);
     border-radius: var(--radius-md);
     padding: 16px;
-    height: 400px !important;
+    min-height: 360px !important;
+    max-height: 460px !important;
     overflow-y: auto;
-    font-family: "Segoe UI", system-ui, sans-serif;
     font-size: 0.95rem;
     line-height: 1.6;
 }
-.prompt-card h3 { color: var(--signal); border-bottom: 1px solid var(--rule); padding-bottom: 8px; margin-top: 10px; }
-.prompt-card strong { color: var(--ink); background-color: #EEF1FB; padding: 0 4px; border-radius: 4px; }
+.prompt-card h3 {
+    color: var(--signal);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 8px;
+    margin-top: 10px;
+}
+.prompt-card strong {
+    color: var(--ink);
+    background-color: var(--signal-subtle);
+    padding: 0 4px;
+    border-radius: 4px;
+}
+.prompt-card h3 {
+    font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
+    font-size: 1.45rem;
+}
+.prompt-card h4 {
+    margin: 16px 0 8px;
+    color: var(--ink);
+    border-top: 1px solid var(--rule);
+    padding-top: 12px;
+}
+.prompt-card code {
+    background: #EEF1FB;
+    color: #1B2230;
+    border: 1px solid #D8E0F2;
+    border-radius: 4px;
+    padding: 1px 4px;
+}
+.method-process-card {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font-size: 0.95rem;
+    line-height: 1.55;
+}
+.method-process-card h3 {
+    font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
+    font-size: 1.45rem;
+    margin: 0;
+}
+.method-process-card p {
+    margin: 6px 0 0;
+    color: var(--muted);
+}
+.process-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
+    padding: 2px 2px 14px;
+}
+.process-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 30px;
+    padding: 4px 10px;
+    border: 1px solid #B7D7C8;
+    border-radius: 999px;
+    background: var(--pass-subtle);
+    color: var(--pass);
+    font-size: 0.82rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+.method-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0 0 12px;
+}
+.method-kpi {
+    min-height: 68px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-md);
+    background: var(--panel-raised);
+    padding: 10px 12px;
+}
+.method-kpi span {
+    display: block;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+.method-kpi strong {
+    display: block;
+    margin-top: 4px;
+    color: var(--ink);
+    font-size: 1rem;
+    overflow-wrap: anywhere;
+}
+.method-kpi.signal strong { color: var(--signal); }
+.method-kpi.builder strong { color: var(--builder); }
+.method-kpi.pass strong { color: var(--pass); }
+.method-stage-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+.method-stage {
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-md);
+    background: var(--panel-raised);
+    padding: 14px;
+    min-height: 220px;
+}
+.method-stage:nth-child(5),
+.method-stage.phase-final {
+    grid-column: 1 / -1;
+    min-height: auto;
+}
+.method-stage.muted {
+    min-height: 150px;
+}
+.stage-head {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.stage-head span {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: var(--signal-subtle);
+    color: var(--signal);
+    font-weight: 900;
+    font-size: 0.82rem;
+}
+.phase-local .stage-head span { background: var(--builder-subtle); color: var(--builder); }
+.phase-sam .stage-head span { background: var(--pass-subtle); color: var(--pass); }
+.phase-pvla .stage-head span { background: #F2F4F7; color: var(--ink); }
+.phase-final .stage-head span { background: #F7F1EA; color: var(--builder); }
+.method-stage h4 {
+    margin: 0;
+    color: var(--ink);
+    font-size: 1rem;
+    line-height: 1.25;
+}
+.method-stage ul {
+    margin: 10px 0 0;
+    padding-left: 18px;
+}
+.method-stage li {
+    margin: 6px 0;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+}
+.method-stage li span {
+    color: var(--muted);
+}
+.method-process-card code {
+    background: #EEF1FB;
+    color: #1B2230;
+    border: 1px solid #D8E0F2;
+    border-radius: 4px;
+    padding: 1px 4px;
+    overflow-wrap: anywhere;
+}
 .logic-view-img {
-    height: 400px !important;
+    height: 360px !important;
     border-radius: var(--radius-md);
     overflow: hidden;
     border: 1px solid var(--rule);
@@ -1487,11 +1965,24 @@ html, body, .gradio-container {
     align-items: center;
     background: var(--panel-raised);
 }
-.result-tag {
-    border: 1px solid var(--rule);
-    border-radius: 999px;
-    padding: 4px 10px;
-    color: var(--muted);
+.hidden-artifact {
+    display: none !important;
+}
+@media (max-width: 1100px) {
+    .hero-panel {
+        grid-template-columns: 1fr;
+    }
+    .method-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .method-kpi-grid,
+    .method-stage-grid {
+        grid-template-columns: 1fr;
+    }
+    .method-stage:nth-child(5),
+    .method-stage.phase-final {
+        grid-column: auto;
+    }
 }
 """
 
@@ -1512,160 +2003,193 @@ def create_ui():
     ]
     
     with gr.Blocks(css=CSS, theme=desk_theme, title="GLLS QA Method Desk") as demo:
-        
-        # --- Header ---
-        with gr.Row(elem_classes="header-bar"):
-            with gr.Column(scale=4):
-                gr.Markdown("# 逐题查看 GLLS 如何搜索、切割、召回并回答")
-                gr.Markdown("Online MVTec / VisA QA runner. Configure paths, load a category, run the current GLLS method, and inspect MCTS, SAM3, PVLA/RAG evidence for each question.")
-            with gr.Column(scale=1):
-                status_box = gr.Textbox(label="System Status", value="Uninitialized", interactive=False, container=False)
 
-        # --- Main Layout ---
+        with gr.Row(elem_classes="app-topbar"):
+            with gr.Column(scale=3):
+                gr.HTML(
+                    """
+                    <div class="brand-block">
+                      <div class="brand-mark"></div>
+                      <div class="brand-copy">
+                        <strong>GLLS QA Method Desk</strong>
+                        <small>Global logic, local evidence, SAM3 refinement, and PVLA/RAG provenance.</small>
+                      </div>
+                    </div>
+                    """
+                )
+            with gr.Column(scale=2, elem_classes="status-chip"):
+                status_box = gr.Textbox(label="Runtime", value="Not initialized", interactive=False, container=False)
+
+        gr.HTML(
+            """
+            <section class="hero-panel">
+              <div>
+                <div class="eyebrow">Method playback</div>
+                <h1>GLLS Method Playback</h1>
+                <p class="hero-copy">
+                  Pick a QA sample and replay the two-stage reasoning path: Phase-1 global
+                  report, small-model heatmap proposals, MCTS crop search, SAM3 structural
+                  refinement, PVLA/RAG recall, and Phase-2 answer fusion.
+                </p>
+              </div>
+              <div class="hero-metrics">
+                <span><b>1</b><em>Initialize from local config</em></span>
+                <span><b>2</b><em>Load dataset/category QA rows</em></span>
+                <span><b>3</b><em>Run and export the evidence bundle</em></span>
+              </div>
+            </section>
+            """
+        )
+
+        with gr.Accordion("Runtime setup (read from local_paths.sh by default)", open=False):
+            gr.Markdown(
+                "Set paths once in `scripts/dev/local_paths.sh`, then start this page with "
+                "`bash scripts/run/run_visualize.sh`. These fields are only for overriding the active session."
+            )
+            with gr.Row():
+                dd_model_type = gr.Dropdown(
+                    ["qwen3-vl", "qwen2.5-vl", "llava-onevision"],
+                    label="VLM architecture",
+                    value="qwen3-vl",
+                )
+                dd_gpu = gr.Dropdown([str(i) for i in range(8)], value="0", label="GPU")
+                cb_vllm = gr.Checkbox(label="Use vLLM if installed", value=False, interactive=True)
+                sl_gpu_util = gr.Slider(0.3, 0.95, value=0.85, step=0.05, label="vLLM memory fraction")
+            with gr.Row():
+                p_model = gr.Textbox(DEFAULT_VLM_MODEL_PATH, label="VLM model folder")
+                p_sam = gr.Textbox(DEFAULT_SAM3_PATH, label="SAM3 checkpoint")
+            with gr.Row():
+                p_data = gr.Textbox(DEFAULT_MMAD_ROOT, label="MMAD dataset root")
+                p_qa = gr.Textbox(DEFAULT_QA_ROOT, label="Curated QA root")
+            with gr.Row():
+                p_ckpt = gr.Textbox(
+                    DEFAULT_ADAPTCLIP_CHECKPOINT_PATH,
+                    label="AdaptCLIP checkpoint",
+                )
+                p_graph = gr.Textbox(DEFAULT_GRAPH_ROOT, label="PVLA graph cache root")
+            btn_init = gr.Button("Initialize GLLS runtime", elem_classes="desk-btn-primary")
+
         with gr.Row():
-            
-            # --- LEFT: Config & Search ---
-            with gr.Column(scale=1, min_width=440):
+            with gr.Column(scale=1, min_width=390):
                 with gr.Column(elem_classes="custom-card"):
-                    gr.Markdown("### Engine Configuration", elem_classes="section-title")
-                    with gr.Accordion("Model & GPU Settings", open=True):
-                        dd_model_type = gr.Dropdown(
-                            ["qwen2.5-vl", "qwen3-vl", "llava-onevision"], 
-                            label="Model Architecture", value="qwen3-vl"
-                        )
-                        with gr.Row():
-                            cb_vllm = gr.Checkbox(label="Enable vLLM Acceleration", value=True, interactive=True)
-                            dd_gpu = gr.Dropdown([str(i) for i in range(8)], value="4", label="GPU ID")
-                        
-                        sl_gpu_util = gr.Slider(0.3, 0.95, value=0.85, step=0.05, label="vLLM GPU Memory Utilization")
-
-                        p_model = gr.Textbox(DEFAULT_VLM_MODEL_PATH, label="VLM Path")
-                        p_sam = gr.Textbox(DEFAULT_SAM3_PATH, label="SAM3 Path")
-
-                        # [Dataset Selection]
-                        dd_dataset = gr.Dropdown(["mvtec", "visa"], label="Dataset Name", value="mvtec")
-
-                        # [Path Auto-Correction Demo]
-                        # Default set to parent folder MMAD to show auto-append feature
-                        p_data = gr.Textbox(DEFAULT_MMAD_ROOT, label="Dataset Root (Parent Folder)")
-                        p_qa = gr.Textbox(DEFAULT_QA_ROOT, label="QA Collection Root")
-
-                        p_ckpt = gr.Textbox(
-                            DEFAULT_ADAPTCLIP_CHECKPOINT_PATH,
-                            label="AdaptCLIP Checkpoint Path"
-                        )
-
-                        p_graph = gr.Textbox(DEFAULT_GRAPH_ROOT, label="Graph DB")
-                    
-                    btn_init = gr.Button("Initialize Engine", elem_classes="desk-btn-primary")
-                
-                with gr.Column(elem_classes="custom-card"):
-                    gr.Markdown("### QA Catalog", elem_classes="section-title")
-                    
-                    dd_cat = gr.Dropdown(MVTEC_CLASSES, label="1. Category", value="bottle", interactive=True)
-                    
-                    btn_load = gr.Button("Load Category", size="sm")
-                    
+                    gr.Markdown("### QA Sample", elem_classes="section-title")
+                    gr.Markdown("Choose a dataset/category, load QA rows, then select one question.", elem_classes="section-copy")
+                    dd_dataset = gr.Dropdown(["mvtec", "visa"], label="Dataset", value="mvtec")
+                    dd_cat = gr.Dropdown(MVTEC_CLASSES, label="Category", value="bottle", interactive=True)
+                    btn_load = gr.Button("Load QA rows", size="sm", elem_classes="desk-btn-secondary")
                     with gr.Row():
-                        dd_sub_type = gr.Dropdown(label="2. Subclass", choices=["All"], value="All")
-                        dd_logic = gr.Dropdown(label="3. Task Type", choices=["All"], value="All")
-                    
-                    txt_search_case = gr.Textbox(placeholder="category / image / question / task", label="4. Search")
-                    dd_samples_list = gr.Dropdown(label="5. Select Sample", choices=[], interactive=True)
-                    
-                    img_preview_in = gr.Image(label="Input View", type="pil", height=280, elem_classes="desk-image-upload")
-                    txt_q_in = gr.Textbox(label="Inspector Command", lines=2)
-                    with gr.Accordion("Metadata", open=False):
-                        txt_gt_out = gr.Textbox(label="Ground Truth", interactive=False)
+                        dd_sub_type = gr.Dropdown(label="Defect folder", choices=["All"], value="All")
+                        dd_logic = gr.Dropdown(label="Task", choices=["All"], value="All")
+                    txt_search_case = gr.Textbox(placeholder="image name / question / task", label="Search")
+                    dd_samples_list = gr.Dropdown(label="Question", choices=[], interactive=True)
+                    img_preview_in = gr.Image(label="Input image", type="pil", height=300, elem_classes="desk-image-upload")
+                    txt_q_in = gr.Textbox(label="Question", lines=2)
+                    with gr.Accordion("Answer options", open=False):
+                        txt_gt_out = gr.Textbox(label="Ground truth", interactive=False)
                         txt_opts_json = gr.Code(label="Options", language="json")
+                    btn_run_main = gr.Button("Run GLLS on this question", variant="primary", size="lg", elem_classes="desk-btn-primary")
 
-                    btn_run_main = gr.Button("Run GLLS Method", variant="primary", size="lg", elem_classes="desk-btn-primary")
+                with gr.Column(elem_classes="custom-card tight"):
+                    gr.Markdown("### Method Streams", elem_classes="section-title")
+                    gr.HTML(
+                        """
+                        <div class="method-strip">
+                          <span>Phase-1 global</span>
+                          <span>Small model + MCTS</span>
+                          <span>SAM3 logic cut</span>
+                          <span>PVLA/RAG recall</span>
+                          <span>Phase-2 answer</span>
+                        </div>
+                        """
+                    )
 
-            # --- RIGHT: Visual Intelligence Dashboard ---
             with gr.Column(scale=2):
-                
-                # Top Intelligence Row
+                with gr.Column(elem_classes="custom-card"):
+                    gr.Markdown("### Method Process", elem_classes="section-title")
+                    md_method_process = gr.HTML(_method_process_placeholder())
+
                 with gr.Row():
                     with gr.Column(scale=1, elem_classes="custom-card"):
-                        gr.Markdown("### Source-backed PVLA Knowledge", elem_classes="section-title")
-                        with gr.Tabs():
-                            with gr.TabItem("Visual Standards"):
-                                gal_rag_source = gr.Gallery(
-                                    label="RAG Retrieved Images", 
-                                    show_label=True,
-                                    columns=3, 
-                                    rows=2,
-                                    height=250, 
-                                    object_fit="contain", 
-                                    interactive=True,
-                                    type="filepath"
-                                )
-                            with gr.TabItem("Text Rules"):
-                                txt_rag_manual = gr.TextArea(label="Instruction Text", lines=10, interactive=True)
-                        
-                        btn_rerun_all = gr.Button("Rerun Full Pipeline", size="sm", variant="secondary")
-                    
+                        gr.Markdown("### Global Heatmap", elem_classes="section-title")
+                        img_hm_out = gr.Image(label="Heatmap evidence", type="pil", height=280, elem_classes="evidence-image")
                     with gr.Column(scale=1, elem_classes="custom-card"):
-                        gr.Markdown("### Global Anomaly Heatmap", elem_classes="section-title")
-                        img_hm_out = gr.Image(label="Anomaly Trace", type="pil", height=265)
+                        gr.Markdown("### SAM3 / Local Evidence", elem_classes="section-title")
+                        gal_sam3_preview = gr.Gallery(
+                            label="Selected local views",
+                            columns=4,
+                            height=280,
+                            object_fit="contain",
+                            preview=True,
+                        )
+                        file_sam3_editor = gr.File(
+                            label="Selected focus files",
+                            file_count="multiple",
+                            type="filepath",
+                            visible=False,
+                        )
 
-                # SAM3 Refinement
                 with gr.Column(elem_classes="custom-card"):
-                    gr.Markdown("### SAM3 Local Refinement", elem_classes="section-title")
-                    gal_sam3_preview = gr.Gallery(label="SAM3 Visual Results", columns=5, height=220, object_fit="contain", preview=True)
-                    file_sam3_editor = gr.File(label="Focus List Editor", file_count="multiple", type="filepath", height=100)
-
-                # Final Decision
-                with gr.Column(elem_classes="custom-card"):
+                    gr.Markdown("### Source-backed PVLA Knowledge", elem_classes="section-title")
                     with gr.Tabs():
-                        with gr.TabItem("Question Result"):
-                            md_final_res = gr.Markdown("### *Waiting for results...*")
-                        
-                        with gr.TabItem("Logic Debug"):
+                        with gr.TabItem("Visual references"):
+                            gal_rag_source = gr.Gallery(
+                                label="Retrieved normal/reference cutouts",
+                                show_label=True,
+                                columns=4,
+                                rows=1,
+                                height=180,
+                                object_fit="contain",
+                                type="filepath",
+                            )
+                        with gr.TabItem("Text knowledge"):
+                            txt_rag_manual = gr.TextArea(label="Retrieved knowledge blocks", lines=7, interactive=False)
+
+                with gr.Column(elem_classes="custom-card"):
+                    gr.Markdown("### Answer and Evidence Trace", elem_classes="section-title")
+                    with gr.Tabs():
+                        with gr.TabItem("Question result"):
+                            md_final_res = gr.Markdown("### Waiting for a run")
+
+                        with gr.TabItem("Prompt evidence"):
                             with gr.Row(equal_height=True):
                                 with gr.Column(scale=1):
-                                    gr.Markdown("### Visual Input", elem_classes="section-title-sm")
-                                    img_logic_debug = gr.Image(label="Logic View", type="pil", elem_classes="logic-view-img", show_label=False, interactive=False)
+                                    gr.Markdown("### Visual input", elem_classes="section-title-sm")
+                                    img_logic_debug = gr.Image(label="Logic view", type="pil", elem_classes="logic-view-img", show_label=False, interactive=False)
                                 with gr.Column(scale=1):
-                                    gr.Markdown("### Constructed Prompt", elem_classes="section-title-sm")
-                                    md_p1_prompt = gr.Markdown(value="*Waiting...*", elem_classes="prompt-card")
+                                    gr.Markdown("### Phase-1 prompt", elem_classes="section-title-sm")
+                                    md_p1_prompt = gr.Markdown(value="Waiting for a run.", elem_classes="prompt-card")
+                            txt_cot_edit = gr.TextArea(label="Final prompt", lines=8, interactive=False)
 
-                        with gr.TabItem("Phase 2 Rerun"):
-                            txt_cot_edit = gr.TextArea(label="Instruction", lines=8, interactive=True)
-                            btn_manual_rerun = gr.Button("Rerun Phase 2 Only", variant="secondary", elem_classes="desk-btn-primary")
-                        
-                        with gr.TabItem("Live Logs"):
+                        with gr.TabItem("Run logs"):
                             txt_logs_stream = gr.TextArea(elem_classes="log-box", lines=12, show_copy_button=True)
 
-                # Export / Download
                 with gr.Column(elem_classes="custom-card"):
                     gr.Markdown("### Export", elem_classes="section-title")
                     cb_export_docx = gr.Checkbox(
-                        label="Include Word report (.docx) inside ZIP (requires python-docx)",
+                        label="Include Word report (.docx) inside ZIP",
                         value=True,
                         interactive=True,
                     )
-                    # Prefer 1-click download if Gradio supports DownloadButton; otherwise fallback to File output.
                     if hasattr(gr, "DownloadButton"):
                         try:
                             btn_export_zip = gr.DownloadButton(
-                                "Download Full Run (ZIP)",
+                                "Download full run bundle",
                                 variant="primary",
                                 size="lg",
                                 elem_classes="desk-btn-primary",
                             )
                         except TypeError:
-                            btn_export_zip = gr.DownloadButton("Download Full Run (ZIP)")
+                            btn_export_zip = gr.DownloadButton("Download full run bundle")
                         file_export_zip = None
                     else:
                         btn_export_zip = gr.Button(
-                            "Generate Export (ZIP)",
+                            "Generate export bundle",
                             variant="primary",
                             size="lg",
                             elem_classes="desk-btn-primary",
                         )
                         file_export_zip = gr.File(label="Export ZIP", interactive=False, type="filepath")
-                    txt_export_status = gr.Textbox(label="Export Status", interactive=False)
+                    txt_export_status = gr.Textbox(label="Export status", interactive=False)
 
         # --- States ---
         txt_hidden_t_type = gr.Textbox(visible=False)
@@ -1765,21 +2289,7 @@ def create_ui():
         btn_run_main.click(
             search_runner_wrapper,
             inputs=[img_preview_in, txt_q_in, dd_cat, txt_hidden_t_type, txt_opts_json, txt_gt_out],
-            outputs=[gal_rag_source, txt_rag_manual, img_hm_out, gal_sam3_preview, file_sam3_editor, txt_logs_stream, md_final_res, txt_cot_edit, state_redbox_pil, state_crops_paths, img_logic_debug, md_p1_prompt],
-            api_name=False,
-        )
-
-        btn_rerun_all.click(
-            search_runner_wrapper,
-            inputs=[img_preview_in, txt_q_in, dd_cat, txt_hidden_t_type, txt_opts_json, txt_gt_out, txt_rag_manual, gal_rag_source],
-            outputs=[gal_rag_source, txt_rag_manual, img_hm_out, gal_sam3_preview, file_sam3_editor, txt_logs_stream, md_final_res, txt_cot_edit, state_redbox_pil, state_crops_paths, img_logic_debug, md_p1_prompt],
-            api_name=False,
-        )
-
-        btn_manual_rerun.click(
-            run_manual_inference_phase2,
-            inputs=[gal_rag_source, txt_rag_manual, txt_cot_edit, state_redbox_pil, file_sam3_editor],
-            outputs=[md_final_res, txt_logs_stream],
+            outputs=[gal_rag_source, txt_rag_manual, img_hm_out, gal_sam3_preview, file_sam3_editor, txt_logs_stream, md_final_res, txt_cot_edit, state_redbox_pil, state_crops_paths, img_logic_debug, md_p1_prompt, md_method_process],
             api_name=False,
         )
 

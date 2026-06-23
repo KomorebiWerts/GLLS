@@ -4,6 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
+LOCAL_PATHS_FILE="${GLLS_LOCAL_PATHS_FILE:-${SCRIPT_DIR}/local_paths.sh}"
+if [[ -f "${LOCAL_PATHS_FILE}" ]]; then
+  # shellcheck source=/dev/null
+  source "${LOCAL_PATHS_FILE}"
+fi
+
 export GLLS_PROJECT_ROOT="${GLLS_PROJECT_ROOT:-${REPO_ROOT}}"
 export GLLS_DATA_ROOT="${GLLS_DATA_ROOT:-${HOME}/data/GLLS}"
 export GLLS_DATASET_ROOT="${GLLS_DATASET_ROOT:-${GLLS_DATA_ROOT}/datasets/MMAD}"
