@@ -1,9 +1,5 @@
 [project]
-name = "GLLS"
+name = "glls"
 version = "0.1.0"
-description = "GLLS anomaly QA research pipeline"
+description = "Global Logic and Local Semantic industrial anomaly QA"
 requires-python = ">=3.10"
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]

@@ -1,0 +1,2706 @@
+{
+    "image/defective/000.png": {
+        "image_path": "image/defective/000.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Color mismatch.",
+                    "B": "Contamination and misalignment.",
+                    "C": "Cracks.",
+                    "D": "Missing bristles."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "In the handle.",
+                    "B": "On the left-center side and top center of the brush head.",
+                    "C": "At the base of the bristles.",
+                    "D": "On the back of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A blue stain.",
+                    "B": "A scratch on the surface.",
+                    "C": "A brownish spot and irregular bristles.",
+                    "D": "Melted plastic."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "It increases the toothbrush's effectiveness.",
+                    "B": "It has no effect on the toothbrush's functionality.",
+                    "C": "It presents potential hygiene issues and affects performance.",
+                    "D": "It changes the color of the toothbrush."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/000_rgb_mask.png"
+    },
+    "image/defective/001.png": {
+        "image_path": "image/defective/001.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Cracked handle.",
+                    "B": "Discoloration.",
+                    "C": "Missing bristles.",
+                    "D": "Bent bristles."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Bottom left of the brush head.",
+                    "B": "Top center of the brush head.",
+                    "C": "Middle of the handle.",
+                    "D": "Back of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A crack along the handle.",
+                    "B": "Stains on the bristles.",
+                    "C": "A small, visibly empty area on the brush head.",
+                    "D": "Melted plastic on the brush surface."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Reduces the effectiveness of brushing.",
+                    "B": "Changes the color of the toothbrush.",
+                    "C": "Makes the handle uncomfortable to hold.",
+                    "D": "Causes the toothbrush to vibrate abnormally."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/001_rgb_mask.png"
+    },
+    "image/defective/002.png": {
+        "image_path": "image/defective/002.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Color inconsistency.",
+                    "B": "Bristle cluster absence.",
+                    "C": "Shape deformation.",
+                    "D": "Material breakage."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "At the top of the toothbrush head.",
+                    "B": "At the center of the toothbrush head.",
+                    "C": "On the toothbrush handle.",
+                    "D": "On the left side of the toothbrush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Missing bristles.",
+                    "B": "Cracked handle.",
+                    "C": "Stained bristles.",
+                    "D": "Bent bristles."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. In addition to the missing bristle cluster, what other defect is visible on the toothbrush?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Melted bristles.",
+                    "B": "Disheveled and inconsistent bristles.",
+                    "C": "Misprinted branding on the handle.",
+                    "D": "Loose bristles falling off."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/002_rgb_mask.png"
+    },
+    "image/defective/003.png": {
+        "image_path": "image/defective/003.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Color fading.",
+                    "B": "Broken handle.",
+                    "C": "Missing bristles.",
+                    "D": "Incorrect packaging."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Near the bottom end of the handle.",
+                    "B": "On the back side of the toothbrush.",
+                    "C": "Near the top center of the brush head.",
+                    "D": "On the edge of the brush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Scratch marks on the handle.",
+                    "B": "Discoloration of the bristles.",
+                    "C": "Dents on the toothbrush body.",
+                    "D": "Logo peeling off."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "D",
+                "Options": {
+                    "A": "The toothbrush vibrates abnormally.",
+                    "B": "Bristles are not effective in cleaning.",
+                    "C": "Creates discomfort during use.",
+                    "D": "Interrupts the regular pattern of bristles."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/003_rgb_mask.png"
+    },
+    "image/defective/004.png": {
+        "image_path": "image/defective/004.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the toothbrush?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Cracked handle.",
+                    "B": "Discoloration and missing bristles.",
+                    "C": "Warped plastic.",
+                    "D": "Electronic malfunction."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Top left of the toothbrush head.",
+                    "B": "Bottom center of the toothbrush head.",
+                    "C": "On the handle.",
+                    "D": "In the packaging."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Scratches on the surface.",
+                    "B": "Discoloration or foreign material.",
+                    "C": "Logo faded.",
+                    "D": "Melted bristles."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There are some defects in the object. Are there any additional defects present besides the discoloration?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes, there is also a missing bristle cluster and misaligned bristles.",
+                    "B": "No, the discoloration is the only defect.",
+                    "C": "Yes, there is also a crack in the toothbrush head.",
+                    "D": "Yes, there is excessive glue visible on the bristles."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/004_rgb_mask.png"
+    },
+    "image/defective/005.png": {
+        "image_path": "image/defective/005.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Wrong color.",
+                    "B": "Missing part.",
+                    "C": "Disarrangement.",
+                    "D": "Incorrect size."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "On the handle.",
+                    "B": "At the top center portion of the toothbrush.",
+                    "C": "On the side edges of the toothbrush.",
+                    "D": "At the bottom of the handle."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Bristles are shorter than normal.",
+                    "B": "Bristles are fused together.",
+                    "C": "Bristles appear disarranged and splayed out.",
+                    "D": "Bristles have changed color uniformly."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What additional information is indicated about the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "It reduces the effectiveness of the toothbrush.",
+                    "B": "It is caused by excessive heat.",
+                    "C": "There is also subtle discoloration in a small cluster of bristles.",
+                    "D": "It makes the toothbrush easier to use."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/005_rgb_mask.png"
+    },
+    "image/defective/006.png": {
+        "image_path": "image/defective/006.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Color inconsistency.",
+                    "B": "Misalignment.",
+                    "C": "Contamination or residue.",
+                    "D": "Structural damage."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "On the handle.",
+                    "B": "At the center of the head.",
+                    "C": "On the outer bristles.",
+                    "D": "At the base of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Bristles are longer than usual.",
+                    "B": "There is a crack on the toothbrush head.",
+                    "C": "The affected bristles are lighter in color and disrupted.",
+                    "D": "The toothbrush head has completely fallen apart."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Increases the cleaning efficiency.",
+                    "B": "Disrupts the neat alignment of the bristles.",
+                    "C": "Changes the color of the toothbrush handle.",
+                    "D": "Affects the flexibility of the bristles."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/006_rgb_mask.png"
+    },
+    "image/defective/007.png": {
+        "image_path": "image/defective/007.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Color mismatch.",
+                    "B": "Extra bristles added.",
+                    "C": "Missing bristles.",
+                    "D": "Wrong size."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Top center of the toothbrush head.",
+                    "B": "Bottom center of the toothbrush head.",
+                    "C": "Left side of the toothbrush handle.",
+                    "D": "Right side of the toothbrush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "The bristles are too long.",
+                    "B": "The bristles are discolored.",
+                    "C": "The bristles are missing in an area.",
+                    "D": "The bristles are too short."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What effect might the defect have on the object?",
+                "Answer": "C",
+                "Options": {
+                    "A": "It will make the toothbrush vibrate more.",
+                    "B": "It could provide better cleaning.",
+                    "C": "It might make the toothbrush less effective for brushing.",
+                    "D": "It will change the flavor of toothpaste."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/007_rgb_mask.png"
+    },
+    "image/defective/008.png": {
+        "image_path": "image/defective/008.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Contamination or unusual markings.",
+                    "B": "Incorrect color.",
+                    "C": "Melted plastic.",
+                    "D": "Broken handle."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "At the top center of the bristles.",
+                    "B": "On the handle.",
+                    "C": "At the bottom edge of the bristles.",
+                    "D": "On the back side of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Signs of contamination diverging from the consistent pattern.",
+                    "B": "A crack in the toothbrush head.",
+                    "C": "Warped bristles throughout.",
+                    "D": "A chip in the plastic of the handle."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "The bristles are disarrayed or messy.",
+                    "B": "The toothbrush vibrates abnormally.",
+                    "C": "The color of the bristles fades.",
+                    "D": "The toothbrush head is misshapen."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/008_rgb_mask.png"
+    },
+    "image/defective/009.png": {
+        "image_path": "image/defective/009.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the toothbrush?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Cracked handle.",
+                    "B": "Contamination in the bristles.",
+                    "C": "Missing bristles.",
+                    "D": "Broken head."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Top center of the toothbrush head.",
+                    "B": "Bottom center of the toothbrush head.",
+                    "C": "On the handle of the toothbrush.",
+                    "D": "On the back of the toothbrush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "A discoloration on the handle.",
+                    "B": "A disruption in the bristle pattern.",
+                    "C": "A large crack on the toothbrush head.",
+                    "D": "A completely different color of one bristle cluster."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "It makes the toothbrush handle slippery.",
+                    "B": "It reduces the effectiveness of brushing.",
+                    "C": "It causes the toothbrush to vibrate unusually.",
+                    "D": "It changes the taste of toothpaste when brushing."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/009_rgb_mask.png"
+    },
+    "image/defective/010.png": {
+        "image_path": "image/defective/010.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "accepted_answers": [
+                    "B",
+                    "C"
+                ],
+                "Options": {
+                    "A": "Color mismatch.",
+                    "B": "Missing bristles.",
+                    "C": "Disorganized bristle arrangement.",
+                    "D": "Broken handle."
+                },
+                "type": "Defect Classification",
+                "annotation": true,
+                "edited": true,
+                "original_answer": "C",
+                "edit_reason": "The bottom bristle region is visibly sparse/missing and disorganized, so both B and C describe the defect.",
+                "edit_evidence": "DS-MVTec/toothbrush/image/defective/010.png."
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "At the top of the toothbrush head.",
+                    "B": "In the middle of the toothbrush head.",
+                    "C": "At the bottom center of the toothbrush head.",
+                    "D": "On the handle of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "The bristles are too long.",
+                    "B": "The bristles are splayed out in various directions.",
+                    "C": "The bristles are all the same color.",
+                    "D": "The bristles are completely missing."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What does the defect suggest about the toothbrush?",
+                "Answer": "B",
+                "Options": {
+                    "A": "The toothbrush has an ergonomic grip.",
+                    "B": "There is an issue with the bristle implantation process.",
+                    "C": "The toothbrush is a child-size model.",
+                    "D": "The toothbrush is designed for sensitive teeth."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/010_rgb_mask.png"
+    },
+    "image/defective/011.png": {
+        "image_path": "image/defective/011.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the toothbrush?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Stain on the handle.",
+                    "B": "Missing bristles.",
+                    "C": "Cracked handle.",
+                    "D": "Discoloration of bristles."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "At the top of the brush head.",
+                    "B": "Approximate center of the brush head.",
+                    "C": "On the handle.",
+                    "D": "On the side edge of the brush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A chunk of bristles longer than the rest.",
+                    "B": "A discoloration in the pattern.",
+                    "C": "Some bristles are missing.",
+                    "D": "Bristles twisted into knots."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "It makes the brush more effective at cleaning.",
+                    "B": "It has no effect.",
+                    "C": "It disrupts the uniform pattern of bristles.",
+                    "D": "It changes the color of the bristles."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/011_rgb_mask.png"
+    },
+    "image/defective/012.png": {
+        "image_path": "image/defective/012.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "No.",
+                    "B": "Yes."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Stained handle.",
+                    "B": "Mismatched color bristles.",
+                    "C": "Missing and clumped bristles.",
+                    "D": "Scratched surface."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Top right of the toothbrush head.",
+                    "B": "Bottom center of the toothbrush head.",
+                    "C": "Left side of the toothbrush head.",
+                    "D": "Entire toothbrush handle."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Extra bristles.",
+                    "B": "Bristles with different length.",
+                    "C": "Clear gaps and clumped bristles.",
+                    "D": "Bristles with varying thickness."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What effect does the defect have?",
+                "Answer": "C",
+                "Options": {
+                    "A": "It changes the color of the bristles.",
+                    "B": "It increases the toothbrush's grip.",
+                    "C": "It affects the symmetry and expected orderly arrangement of the bristles.",
+                    "D": "It makes the toothbrush waterproof."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/012_rgb_mask.png"
+    },
+    "image/defective/013.png": {
+        "image_path": "image/defective/013.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Broken handle.",
+                    "B": "Missing bristles.",
+                    "C": "Foreign material contamination.",
+                    "D": "Melted plastic."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "D",
+                "Options": {
+                    "A": "Top left.",
+                    "B": "Top center.",
+                    "C": "Bottom left.",
+                    "D": "Bottom center."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Cracks in the handle.",
+                    "B": "Discoloration and unclean bristles.",
+                    "C": "Excessive wear on bristles.",
+                    "D": "Fading colors on the bristles."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What effect does the defect have on the toothbrush?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Makes the toothbrush unusable.",
+                    "B": "Disrupts the bristle pattern and makes it look untidy.",
+                    "C": "Changes the color of the toothbrush head.",
+                    "D": "Makes the toothbrush handle slippery."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/013_rgb_mask.png"
+    },
+    "image/defective/014.png": {
+        "image_path": "image/defective/014.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Cracking.",
+                    "B": "Discoloration and foreign material.",
+                    "C": "Melted plastic.",
+                    "D": "Electronic malfunction."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "At the top left of the object.",
+                    "B": "At the bottom center of the toothbrush.",
+                    "C": "On the handle of the toothbrush.",
+                    "D": "At the top center of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A large crack in the plastic.",
+                    "B": "A burn mark.",
+                    "C": "Discoloration and potentially foreign material.",
+                    "D": "A broken piece."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the additional anomaly present in the toothbrush?",
+                "Answer": "C",
+                "Options": {
+                    "A": "The bristles are longer than usual.",
+                    "B": "There are missing bristles on the side.",
+                    "C": "The bristles are disheveled or messy around the top center area.",
+                    "D": "The bristles are glowing."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/014_rgb_mask.png"
+    },
+    "image/defective/015.png": {
+        "image_path": "image/defective/015.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Missing bristles.",
+                    "B": "Discoloration.",
+                    "C": "Contamination.",
+                    "D": "Cracked handle."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "At the approximate center of the bristle field.",
+                    "B": "On the edge of the bristle field.",
+                    "C": "At the top of the handle.",
+                    "D": "On the backside of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Brightly colored spots.",
+                    "B": "Foreign material that is inconsistent with the bristles.",
+                    "C": "Smooth, clean surface areas.",
+                    "D": "Engraved markings."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What additional information can be provided on the defect?",
+                "Answer": "D",
+                "Options": {
+                    "A": "The contamination improves bristle quality.",
+                    "B": "The contamination is harmful for dental use.",
+                    "C": "The bristles towards the bottom center are longer than normal.",
+                    "D": "The misplaced and misaligned bristles towards the bottom center."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/015_rgb_mask.png"
+    },
+    "image/defective/016.png": {
+        "image_path": "image/defective/016.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There are some defects in the object. How many types of defects are present?",
+                "Answer": "B",
+                "Options": {
+                    "A": "One.",
+                    "B": "Two.",
+                    "C": "Three.",
+                    "D": "Four."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There are some defects in the object. Where are the defects located?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Top and bottom of the toothbrush head.",
+                    "B": "Center and center left of the toothbrush head.",
+                    "C": "Top right and bottom left of the toothbrush head.",
+                    "D": "Entire toothbrush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There are some defects in the object. What are the appearances of the defects?",
+                "Answer": "A",
+                "Options": {
+                    "A": "A noticeable gap and misaligned bristles.",
+                    "B": "Cracked handle and split bristles.",
+                    "C": "Discoloration and excess glue.",
+                    "D": "Wear and tear on the bristles."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There are some defects in the object. What is the effect of the defects on the toothbrush?",
+                "Answer": "B",
+                "Options": {
+                    "A": "They enhance the toothbrush's cleaning effectiveness.",
+                    "B": "They create an irregular bristle pattern that could affect cleaning.",
+                    "C": "They change the color of the toothbrush bristles.",
+                    "D": "They make the toothbrush more comfortable to hold."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/016_rgb_mask.png"
+    },
+    "image/defective/017.png": {
+        "image_path": "image/defective/017.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Scratches.",
+                    "B": "Contamination.",
+                    "C": "Cracks.",
+                    "D": "Color Fading."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "On the handle.",
+                    "B": "At the top of the bristles.",
+                    "C": "At the central area of the bristles.",
+                    "D": "On the back of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Bristles are longer than usual.",
+                    "B": "Bristles are clumped together and discolored.",
+                    "C": "Bristles are missing.",
+                    "D": "Bristles have different textures."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "It improves cleaning effectiveness.",
+                    "B": "It changes the color of the handle.",
+                    "C": "It reduces cleaning effectiveness.",
+                    "D": "It has no effect."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/017_rgb_mask.png"
+    },
+    "image/defective/018.png": {
+        "image_path": "image/defective/018.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Scratches on the handle.",
+                    "B": "Contamination and a missing bristle.",
+                    "C": "Discoloration of the handle.",
+                    "D": "Cracked brush head."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "On the handle of the toothbrush.",
+                    "B": "On the outer white bristles.",
+                    "C": "In the central area of the brush head.",
+                    "D": "At the bottom of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "A large crack in the plastic.",
+                    "B": "A noticeable gap and dark contamination.",
+                    "C": "A series of melted bristles.",
+                    "D": "Stains on the handle."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "It affects the toothbrush's ability to stand upright.",
+                    "B": "It impacts the uniform appearance of the bristles.",
+                    "C": "It causes the toothbrush to vibrate irregularly.",
+                    "D": "It changes the color of the toothbrush handle."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/018_rgb_mask.png"
+    },
+    "image/defective/019.png": {
+        "image_path": "image/defective/019.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "A crack in the handle.",
+                    "B": "Discolored or contaminated bristles.",
+                    "C": "Mismatched color pattern.",
+                    "D": "Missing bristle cluster."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "accepted_answers": [
+                    "C",
+                    "D"
+                ],
+                "Options": {
+                    "A": "At the bottom of the brush head.",
+                    "B": "On the handle of the toothbrush.",
+                    "C": "At the approximate top center of the brush head.",
+                    "D": "On the side of the toothbrush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true,
+                "edited": true,
+                "original_answer": "C",
+                "edit_reason": "The image shows abnormal bristles near the top center and a prominent protruding bristle cluster on the side, so both C and D are valid for the singularly phrased localization question.",
+                "edit_evidence": "DS-MVTec/toothbrush/image/defective/019.png."
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "The bristles are too short.",
+                    "B": "There is an extra row of bristles.",
+                    "C": "The bristles are bent and misaligned.",
+                    "D": "The bristles have lost their textured appearance."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "It enhances the toothbrush's cleaning ability.",
+                    "B": "It has no effect on the toothbrush's function.",
+                    "C": "It disrupts the uniform pattern and likely affects the cleaning efficiency.",
+                    "D": "It improves the grip of the toothbrush handle."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/019_rgb_mask.png"
+    },
+    "image/defective/020.png": {
+        "image_path": "image/defective/020.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Broken handle.",
+                    "B": "Missing bristle.",
+                    "C": "Contamination.",
+                    "D": "Cracked head."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Around the edge of the brush head.",
+                    "B": "At the base of the toothbrush handle.",
+                    "C": "Approximately at the top center of the brush head.",
+                    "D": "On the back side of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "The bristles have different lengths.",
+                    "B": "There is a discoloration on the bristles.",
+                    "C": "The handle is warped.",
+                    "D": "The bristles are extra soft."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What additional information can be provided about the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "The toothbrush turns on automatically.",
+                    "B": "The bristles are irregularly spaced and not aligned properly.",
+                    "C": "The toothpaste is pre-applied on the bristles.",
+                    "D": "The bristles change color when wet."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/020_rgb_mask.png"
+    },
+    "image/defective/021.png": {
+        "image_path": "image/defective/021.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Cracking on the handle.",
+                    "B": "Discoloration and missing bristles.",
+                    "C": "Logo misprint.",
+                    "D": "Broken plastic edges."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "At the bottom of the brush head.",
+                    "B": "On the sides of the brush head.",
+                    "C": "At the top center and in the center of the brush head.",
+                    "D": "On the handle."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Scratches on the bristles.",
+                    "B": "A large crack down the center of the brush.",
+                    "C": "Brownish discoloration and absence of a section of bristles.",
+                    "D": "Melted portions of the toothbrush."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is a possible effect of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Reduced effectiveness in bristles flexibility.",
+                    "B": "No effect, purely aesthetic.",
+                    "C": "May cause uneven brushing or reduced cleaning effectiveness.",
+                    "D": "Increased risk of bristles falling out during use."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/021_rgb_mask.png"
+    },
+    "image/defective/022.png": {
+        "image_path": "image/defective/022.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Cracked handle.",
+                    "B": "Discolored bristles.",
+                    "C": "Splayed bristles.",
+                    "D": "Melted plastic."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "At the top of the bristles.",
+                    "B": "In the approximate center of the bristle area.",
+                    "C": "At the base of the bristles.",
+                    "D": "On the handle of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A broken toothbrush head.",
+                    "B": "Bristles that are missing.",
+                    "C": "Bristles splayed out in different directions.",
+                    "D": "Stains on the bristles."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What effect does the defect likely have?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Increases the cleaning efficiency.",
+                    "B": "Makes the toothbrush softer.",
+                    "C": "Potentially affects the functionality and aesthetics.",
+                    "D": "Changes the color of the bristles."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/022_rgb_mask.png"
+    },
+    "image/defective/023.png": {
+        "image_path": "image/defective/023.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Discoloration.",
+                    "B": "Misalignment.",
+                    "C": "Missing parts.",
+                    "D": "Cracked handle."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "In the handle of the toothbrush.",
+                    "B": "At the base of the bristles.",
+                    "C": "In the central region of the bristle area.",
+                    "D": "On the back of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Bristles are shorter than normal.",
+                    "B": "Bristles are a different color.",
+                    "C": "Some bristles are protruding out at irregular angles.",
+                    "D": "Bristles are melted together."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What effect does the defect have on the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "The toothbrush can no longer be used for cleaning.",
+                    "B": "It affects the aesthetic appearance of the bristle pattern.",
+                    "C": "It prevents the toothbrush from being stored properly.",
+                    "D": "It changes the color of the toothbrush handle."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/023_rgb_mask.png"
+    },
+    "image/defective/024.png": {
+        "image_path": "image/defective/024.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "D",
+                "Options": {
+                    "A": "Missing bristles.",
+                    "B": "Discoloration.",
+                    "C": "Disorganized bristles.",
+                    "D": "All of the above."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "On the handle of the toothbrush.",
+                    "B": "In the center of the brush head.",
+                    "C": "On the tip of the bristles.",
+                    "D": "Near the bottom of the toothbrush."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Darker discoloration on central bristles.",
+                    "B": "A crack in the handle.",
+                    "C": "A broken head.",
+                    "D": "Faded color on the edges."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Diminished cleaning efficiency.",
+                    "B": "Increased bristle stiffness.",
+                    "C": "Enhanced tooth polishing capability.",
+                    "D": "No effect."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/024_rgb_mask.png"
+    },
+    "image/defective/025.png": {
+        "image_path": "image/defective/025.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Color fading.",
+                    "B": "Misaligned bristles.",
+                    "C": "Cracked handle.",
+                    "D": "Missing bristles."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Top center of the head.",
+                    "B": "Bottom center of the head.",
+                    "C": "On the handle.",
+                    "D": "On the sides of the head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Bristles are too long.",
+                    "B": "Bristles are discolored.",
+                    "C": "Bristles are splayed irregularly.",
+                    "D": "Bristles are fused together."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Makes the toothbrush more ergonomic.",
+                    "B": "Affects the toothbrush's intended performance.",
+                    "C": "Allows for better reach in the mouth.",
+                    "D": "Improves the aesthetic of the toothbrush."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/025_rgb_mask.png"
+    },
+    "image/defective/026.png": {
+        "image_path": "image/defective/026.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Cracked handle.",
+                    "B": "Discolored bristles.",
+                    "C": "Disorganized bristles.",
+                    "D": "Missing bristles."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "At the base of the handle.",
+                    "B": "At the tip of the brush head.",
+                    "C": "At the center of the brush head.",
+                    "D": "On the side of the brush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Bristles are shorter than usual.",
+                    "B": "Bristles are of a different color.",
+                    "C": "Bristles are sticking out and not aligned.",
+                    "D": "Bristles are melted or fused together."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the effect of the defect on the toothbrush?",
+                "Answer": "A",
+                "Options": {
+                    "A": "It makes the toothbrush ineffective for cleaning.",
+                    "B": "It changes the color of the toothbrush handle.",
+                    "C": "It enhances the brushing experience.",
+                    "D": "It has no effect on the toothbrush's function."
+                },
+                "type": "Defect Analysis",
+                "annotation": false
+            }
+        ],
+        "mask_path": "rgb_mask/defective/026_rgb_mask.png"
+    },
+    "image/defective/027.png": {
+        "image_path": "image/defective/027.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "A stain.",
+                    "B": "A missing section of bristles.",
+                    "C": "A crack in the handle.",
+                    "D": "A discoloration of the bristles."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect located?",
+                "Answer": "C",
+                "Options": {
+                    "A": "On the handle.",
+                    "B": "Towards the right edge of the brush head.",
+                    "C": "Towards the approximate center of the brush head.",
+                    "D": "On the bristle tips."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "A",
+                "Options": {
+                    "A": "A break in the bristles pattern.",
+                    "B": "Additional bristles.",
+                    "C": "Changed color in the bristles.",
+                    "D": "Melted bristles."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the additional area of concern on the toothbrush?",
+                "Answer": "C",
+                "Options": {
+                    "A": "The top center where the bristles are extra stiff.",
+                    "B": "The left edge where the bristles are longer than usual.",
+                    "C": "Near the bottom center where the bristles are misaligned.",
+                    "D": "The handle has a different texture."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/027_rgb_mask.png"
+    },
+    "image/defective/028.png": {
+        "image_path": "image/defective/028.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Incorrect color on the handle.",
+                    "B": "Missing bristle area and messy bristles.",
+                    "C": "Improper packaging.",
+                    "D": "Incorrect size for the toothbrush head."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "On the handle of the toothbrush.",
+                    "B": "On the edge of the toothbrush head.",
+                    "C": "In the central region of the toothbrush head.",
+                    "D": "On the back side of the toothbrush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A scratch on the surface.",
+                    "B": "Loosely attached bristles.",
+                    "C": "A missing bristle area and stray bristles.",
+                    "D": "An additional row of bristles."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What additional defect is observed on the toothbrush head?",
+                "Answer": "B",
+                "Options": {
+                    "A": "A broken handle.",
+                    "B": "An unusual spot or contamination towards the bottom center.",
+                    "C": "A misaligned logo.",
+                    "D": "The presence of extra soft bristles."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/028_rgb_mask.png"
+    },
+    "image/defective/029.png": {
+        "image_path": "image/defective/029.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "A",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the type of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Color mismatch.",
+                    "B": "Missing part.",
+                    "C": "Disordered bristles.",
+                    "D": "Broken handle."
+                },
+                "type": "Defect Classification",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. Where is the defect?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Bottom left of the brush head.",
+                    "B": "Top center of the brush head.",
+                    "C": "In the middle of the handle.",
+                    "D": "At the bottom of the brush head."
+                },
+                "type": "Defect Localization",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What is the appearance of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Cracks on the handle.",
+                    "B": "Bristles are different color.",
+                    "C": "Bristles appear messy and not uniform.",
+                    "D": "The brush head is detached."
+                },
+                "type": "Defect Description",
+                "annotation": true
+            },
+            {
+                "Question": "There is a defect in the object. What could be the effect of the defect?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Makes the toothbrush more aesthetically pleasing.",
+                    "B": "Increases the value of the toothbrush.",
+                    "C": "Disrupts the regular pattern and functionality of the toothbrush.",
+                    "D": "Changes the color of the toothbrush."
+                },
+                "type": "Defect Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": "rgb_mask/defective/029_rgb_mask.png"
+    },
+    "image/good/000.png": {
+        "image_path": "image/good/000.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A hairbrush.",
+                    "B": "A cleaning pad.",
+                    "C": "A toothbrush head.",
+                    "D": "A painting brush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "What is the pattern of the bristle arrangement?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Random.",
+                    "B": "Circular.",
+                    "C": "Elliptical.",
+                    "D": "Rectangular."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "What is the appearance of the central bristles in each cluster?",
+                "Answer": "D",
+                "Options": {
+                    "A": "They are longer than the surrounding bristles.",
+                    "B": "They are the same color as the surrounding bristles.",
+                    "C": "They are lighter in color than the surrounding bristles.",
+                    "D": "They are darker in color than the surrounding bristles."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "The darker central bristles presumably indicate what?",
+                "Answer": "C",
+                "Options": {
+                    "A": "They are used for decoration.",
+                    "B": "They are for less effective cleaning.",
+                    "C": "They are for more effective cleaning.",
+                    "D": "They are for musical purposes."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/001.png": {
+        "image_path": "image/good/001.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "B",
+                "Options": {
+                    "A": "A comb.",
+                    "B": "A toothbrush.",
+                    "C": "A paintbrush.",
+                    "D": "A hairbrush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "What is the color of the toothbrush handle?",
+                "Answer": "D",
+                "Options": {
+                    "A": "Blue.",
+                    "B": "Red.",
+                    "C": "Black.",
+                    "D": "White."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "How are the bristles arranged on the brush head?",
+                "Answer": "C",
+                "Options": {
+                    "A": "In a random scatter.",
+                    "B": "In straight rows.",
+                    "C": "In a symmetrical oval pattern.",
+                    "D": "In a circular pattern."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "What colors are the bristle clusters?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Red and green.",
+                    "B": "Blue and white.",
+                    "C": "Orange and purple.",
+                    "D": "Yellow and black."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/002.png": {
+        "image_path": "image/good/002.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "B",
+                "Options": {
+                    "A": "A hairbrush.",
+                    "B": "A toothbrush head.",
+                    "C": "A cleaning sponge.",
+                    "D": "A paintbrush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "How are the bristles arranged on the toothbrush head?",
+                "Answer": "C",
+                "Options": {
+                    "A": "In a single row.",
+                    "B": "In a random pattern.",
+                    "C": "In multiple clusters.",
+                    "D": "In a spiral formation."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "What colors are the bristles on the toothbrush head?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Red and green.",
+                    "B": "Blue and white.",
+                    "C": "Yellow and black.",
+                    "D": "Pink and grey."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "What shape is the toothbrush head?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Square with a flat end.",
+                    "B": "Round with a protruding end.",
+                    "C": "Oval with a narrower end.",
+                    "D": "Triangular with a pointed end."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/003.png": {
+        "image_path": "image/good/003.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A comb.",
+                    "B": "A paintbrush.",
+                    "C": "A toothbrush.",
+                    "D": "A hairbrush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "What is the primary color of the bristle clusters?",
+                "Answer": "D",
+                "Options": {
+                    "A": "Red and green.",
+                    "B": "Yellow and purple.",
+                    "C": "Pink and grey.",
+                    "D": "Dark blue and white."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "How are the bristles organized on the toothbrush?",
+                "Answer": "B",
+                "Options": {
+                    "A": "In a random pattern.",
+                    "B": "In uniform rows with an alternating pattern.",
+                    "C": "In spirals.",
+                    "D": "In large clumps without a clear pattern."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of elements are included in the bristle design?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Glitter.",
+                    "B": "Decorative elements.",
+                    "C": "Cartoon characters.",
+                    "D": "Floral patterns."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/004.png": {
+        "image_path": "image/good/004.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Comb.",
+                    "B": "Hairbrush.",
+                    "C": "Toothbrush.",
+                    "D": "Cleaning brush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "What is the primary color of the toothbrush handle?",
+                "Answer": "D",
+                "Options": {
+                    "A": "Blue.",
+                    "B": "Green.",
+                    "C": "Red.",
+                    "D": "White."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "How are the bristles arranged on the toothbrush?",
+                "Answer": "B",
+                "Options": {
+                    "A": "In circular clusters.",
+                    "B": "In rows.",
+                    "C": "Randomly.",
+                    "D": "In a wave pattern."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "Are there any visible signs of damage or misalignment on the toothbrush?",
+                "Answer": "A",
+                "Options": {
+                    "A": "No, the toothbrush appears to be in good condition.",
+                    "B": "Yes, the handle is broken.",
+                    "C": "Yes, there are missing bristles.",
+                    "D": "Yes, the bristles are discolored."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/005.png": {
+        "image_path": "image/good/005.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Hairbrush.",
+                    "B": "Toothbrush.",
+                    "C": "Paintbrush.",
+                    "D": "Scrub brush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "Where is the toothbrush primarily designed to be used?",
+                "Answer": "B",
+                "Options": {
+                    "A": "In the kitchen.",
+                    "B": "In the bathroom.",
+                    "C": "In a workshop.",
+                    "D": "In the garden."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "What is the color combination of the bristles?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Blue and yellow.",
+                    "B": "Green and black.",
+                    "C": "Red and white.",
+                    "D": "Orange and purple."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "How are the bristles of the toothbrush arranged?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Scattered randomly.",
+                    "B": "In a circular pattern.",
+                    "C": "Arranged in rows.",
+                    "D": "Clustered at one end."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/006.png": {
+        "image_path": "image/good/006.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A comb.",
+                    "B": "A paintbrush.",
+                    "C": "A toothbrush.",
+                    "D": "A hairbrush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "How is the location of the bristles arranged on the toothbrush?",
+                "Answer": "B",
+                "Options": {
+                    "A": "In random spots.",
+                    "B": "In consistent rows.",
+                    "C": "On one side only.",
+                    "D": "In a spiraled pattern."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "What is the appearance of the bristles' color pattern?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Blue surrounded by yellow.",
+                    "B": "Black surrounded by green.",
+                    "C": "Red in the center surrounded by white.",
+                    "D": "Purple in the center with no surrounding color."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "What is distinct about the pattern of bristles compared to normal brushes?",
+                "Answer": "C",
+                "Options": {
+                    "A": "The bristles are of varying lengths.",
+                    "B": "There is an irregular arrangement of bristles.",
+                    "C": "There is an orderly and repeating color pattern.",
+                    "D": "The bristles are all the same color."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/007.png": {
+        "image_path": "image/good/007.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "A",
+                "Options": {
+                    "A": "A toothbrush.",
+                    "B": "A hairbrush.",
+                    "C": "A rake.",
+                    "D": "A feather duster."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "How are the bristles arranged on the toothbrush?",
+                "Answer": "B",
+                "Options": {
+                    "A": "In a random pattern.",
+                    "B": "In consistent rows along the length of the brush head.",
+                    "C": "In a zigzag manner.",
+                    "D": "In a circular pattern."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "What is the color pattern of the bristles?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Blue surrounded by yellow.",
+                    "B": "Red surrounded by white.",
+                    "C": "Green in the center with black around.",
+                    "D": "All bristles are clear."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "Are the bristles' colors vibrant and properly segregated?",
+                "Answer": "C",
+                "Options": {
+                    "A": "The bristles are faded and mixed.",
+                    "B": "The bristles have signs of misalignment.",
+                    "C": "Yes, the colors are vibrant and properly segregated.",
+                    "D": "The bristles show signs of damage."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/008.png": {
+        "image_path": "image/good/008.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "A",
+                "Options": {
+                    "A": "A toothbrush head.",
+                    "B": "A paintbrush.",
+                    "C": "A hairbrush.",
+                    "D": "A cleaning sponge."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "Where is the toothbrush head positioned in relation to the background?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Against a patterned background.",
+                    "B": "Against a solid white background.",
+                    "C": "Against a solid black background.",
+                    "D": "Floating with no visible background."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "What is the appearance of the bristles in terms of color pattern?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Random colors with no pattern.",
+                    "B": "Alternating colors with a symmetrical pattern.",
+                    "C": "Only one color with varying heights.",
+                    "D": "Multi-colored with an asymmetrical design."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "Does the image provide any information about the condition of the toothbrush head?",
+                "Answer": "D",
+                "Options": {
+                    "A": "Yes, it indicates that the bristles are worn out.",
+                    "B": "No, there is no information on the condition.",
+                    "C": "Yes, it mentions the toothbrush head is damaged.",
+                    "D": "Yes, it suggests that the toothbrush head is in good condition."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/009.png": {
+        "image_path": "image/good/009.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "B",
+                "Options": {
+                    "A": "A hairbrush.",
+                    "B": "A toothbrush head.",
+                    "C": "A paintbrush.",
+                    "D": "A scrubbing brush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "What is the color scheme of the bristles?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Red and blue-tipped bristles.",
+                    "B": "White and yellow-tipped bristles.",
+                    "C": "Green and black-tipped bristles.",
+                    "D": "Pink and gray-tipped bristles."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "How are the bristles arranged?",
+                "Answer": "B",
+                "Options": {
+                    "A": "In a random pattern.",
+                    "B": "In clusters with alternating colors.",
+                    "C": "In a single-color block pattern.",
+                    "D": "In a spiral pattern."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "What is the state of the bristles' alignment?",
+                "Answer": "C",
+                "Options": {
+                    "A": "The bristles are misaligned and irregular.",
+                    "B": "The bristles are discolored and worn.",
+                    "C": "The bristles are neatly aligned with no misalignments.",
+                    "D": "The bristles have multiple missing patches."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/011.png": {
+        "image_path": "image/good/011.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A hairbrush.",
+                    "B": "A cleaning sponge.",
+                    "C": "A toothbrush.",
+                    "D": "A paintbrush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "Where is the toothbrush located?",
+                "Answer": "B",
+                "Options": {
+                    "A": "In a bathroom.",
+                    "B": "On a black background.",
+                    "C": "In a store.",
+                    "D": "At a dentist's office."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "What is the appearance of the bristle pattern?",
+                "Answer": "C",
+                "Options": {
+                    "A": "Randomly arranged colors.",
+                    "B": "Solid color without any pattern.",
+                    "C": "Alternating rows of two colors.",
+                    "D": "Multicolored with more than three colors."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "What does the uniformity of the bristles suggest?",
+                "Answer": "B",
+                "Options": {
+                    "A": "The toothbrush is used.",
+                    "B": "Effective quality control in manufacturing.",
+                    "C": "The bristles are worn out.",
+                    "D": "The toothbrush is handcrafted."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    },
+    "image/good/010.png": {
+        "image_path": "image/good/010.png",
+        "conversation": [
+            {
+                "Question": "Is there any defect in the object?",
+                "Answer": "B",
+                "Options": {
+                    "A": "Yes.",
+                    "B": "No."
+                },
+                "type": "Anomaly Detection",
+                "annotation": true
+            },
+            {
+                "Question": "What kind of product is in the image?",
+                "Answer": "C",
+                "Options": {
+                    "A": "A cleaning sponge.",
+                    "B": "A hairbrush.",
+                    "C": "A toothbrush head.",
+                    "D": "A paintbrush."
+                },
+                "type": "Object Classification",
+                "annotation": true
+            },
+            {
+                "Question": "Where is the toothbrush head located in relation to the background?",
+                "Answer": "C",
+                "Options": {
+                    "A": "On a patterned surface.",
+                    "B": "On a white surface.",
+                    "C": "On a solid black background.",
+                    "D": "Floating in the air."
+                },
+                "type": "Object Structure",
+                "annotation": true
+            },
+            {
+                "Question": "What is the appearance of the bristles on the toothbrush head?",
+                "Answer": "C",
+                "Options": {
+                    "A": "They are discolored and irregularly shaped.",
+                    "B": "They are sparse and missing in some areas.",
+                    "C": "They are organized in a symmetrical pattern with alternating colors.",
+                    "D": "They are all a single color and randomly placed."
+                },
+                "type": "Object Details",
+                "annotation": true
+            },
+            {
+                "Question": "What additional information is provided about the toothbrush head?",
+                "Answer": "C",
+                "Options": {
+                    "A": "It contains damaged and misaligned bristles.",
+                    "B": "It is contaminated with foreign material.",
+                    "C": "It has minor variations in the appearance of individual bristles.",
+                    "D": "It displays visible signs of wear and tear."
+                },
+                "type": "Object Analysis",
+                "annotation": true
+            }
+        ],
+        "mask_path": null
+    }
+}

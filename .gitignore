@@ -26,9 +26,9 @@ env/
 /models
 /external
 /outputs
-
-# Local reference papers
-docs/papers/*.pdf
+/logs
+/docs
+/tests
 
 # Experiment outputs and logs
 experiments/
