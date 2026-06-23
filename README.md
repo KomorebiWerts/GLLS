@@ -346,7 +346,7 @@ Prepare dataset metadata and offline normal-reference PVLA/SAM3 assets:
 ```bash
 source scripts/dev/activate_glls.sh
 python scripts/data/prepare_binary_ad_datasets.py
-python scripts/data/prepare_binary_ad_offline.py --dataset all --max_refs 4 --with_sam3
+python scripts/data/prepare_binary_ad_offline.py --dataset all --max_refs 1 --with_sam3
 ```
 
 Run the evaluator:
