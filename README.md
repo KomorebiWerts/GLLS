@@ -9,12 +9,18 @@ QA. The released code keeps one clean path:
 - `glls.cli.binary_ad`: binary anomaly detection on MPDD, DTD-Synthetic, and DAGM.
 - `glls.cli.visualize`: one Gradio frontend for per-question online inspection.
 
-The repository does not publish benchmark images, model checkpoints, experiment
-outputs, tests, old ablations, or static result viewers. Users only need to
-configure dataset/model paths and use the curated QA annotations in
-`qa_collection/`.
+Users only need to configure dataset/model paths and use the curated QA
+annotations in `qa_collection/`.
 
-## Method Overview
+<p align="center">
+  <img src="docs/assets/motivation.png" alt="GLLS motivation and benchmark summary" width="900">
+</p>
+
+## 🔎 Method Overview
+
+<p align="center">
+  <img src="docs/assets/framework.png" alt="GLLS framework" width="900">
+</p>
 
 GLLS combines four components:
 
@@ -33,7 +39,7 @@ GLLS combines four components:
 This keeps the code aligned with the paper idea: global logic, local semantic
 evidence, graph-structured normal knowledge, and traceable local search.
 
-## Why This Release Includes a Curated QA Collection
+## 🧾 Why This Release Includes a Curated QA Collection
 
 The original MMAD QA annotations are noisy enough to affect evaluation:
 
@@ -161,7 +167,7 @@ DAGM `Train/Test/Label` layouts, and generated `meta.json` split files.
 
 ## Model and Checkpoint Resources
 
-The repository does not redistribute model weights.
+Place model weights and external checkpoints at the configured local paths.
 
 Recommended resources and expected local paths:
 
@@ -175,8 +181,8 @@ Recommended resources and expected local paths:
 | Text embedding model | [BAAI/bge-base-en-v1.5](https://huggingface.co/BAAI/bge-base-en-v1.5) | `$GLLS_EMBEDDING_MODEL_PATH` |
 
 The public default is AdaptCLIP 1-shot local evidence plus MCTS/SAM3/PVLA.
-ABounD source code is retained for explicit local runs, but ABounD checkpoints
-are not redistributed.
+ABounD source code is retained for explicit local runs; if using it, put local
+checkpoints under the configured ABounD paths.
 
 SAM3 also needs the official SAM3 Python package/repository on `PYTHONPATH`; the
 activation script expects it at:
@@ -199,7 +205,7 @@ Build or rebuild graph caches from text knowledge and visual references with:
 python -m glls.rag.build_graph
 ```
 
-The generated graph files are local resources and should stay outside git.
+The CLI reads generated graph files from that directory.
 
 ## Run DS-MVTec / VisA QA
 
@@ -296,18 +302,3 @@ loading a dataset/category, each QA row can be run online and inspected with:
 - PVLA/RAG source-backed knowledge blocks;
 - MCTS/SAM3/RAG method trace;
 - exportable run bundle.
-
-## Minimal Release Policy
-
-The GitHub release intentionally excludes:
-
-- benchmark images;
-- model checkpoints;
-- generated graph caches;
-- `outputs/`;
-- `tests/`;
-- old ablation/sweep/audit scripts;
-- static HTML result dumps.
-
-Keep new work inside the retained `src/glls` modules and the three supported
-entrypoints unless the method itself needs a new shared component.

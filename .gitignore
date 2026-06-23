@@ -27,7 +27,9 @@ env/
 /external
 /outputs
 /logs
-/docs
+/docs/*
+!/docs/assets/
+!/docs/assets/**
 /tests
 
 # Experiment outputs and logs
