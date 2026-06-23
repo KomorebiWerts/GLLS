@@ -51,13 +51,13 @@ def adaptclip_root() -> str:
 
 
 def abound_model_path() -> str:
-    return _getenv("GLLS_ABOUND_MODEL_PATH", _as_str(Path(data_root()) / "models" / "ABounD" / "model"))
+    return _getenv("GLLS_ABOUND_MODEL_PATH", _as_str(Path(data_root()) / "models" / "glls-abound-1shot" / "model"))
 
 
 def abound_save_path() -> str:
     return _getenv(
         "GLLS_ABOUND_SAVE_PATH",
-        _as_str(Path(data_root()) / "models" / "ABounD" / "vit336" / "336" / "shot4_CL"),
+        _as_str(Path(data_root()) / "models" / "glls-abound-1shot"),
     )
 
 

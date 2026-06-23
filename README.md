@@ -39,9 +39,9 @@ GLLS combines four components:
 
 1. **🌐 Global inspection**: a VLM first reasons over the full target image and
    the question/options.
-2. **🔍 Local evidence search**: AdaptCLIP produces anomaly heatmaps;
-   MCTS expands and ranks local region proposals instead of passing every crop
-   blindly to the VLM.
+2. **🔍 Local evidence search**: the configured localizer produces anomaly
+   heatmaps; MCTS expands and ranks local region proposals instead of passing
+   every crop blindly to the VLM.
 3. **✂️ SAM3 refinement**: SAM3 is used when the task and category benefit from
    structural/local segmentation. Text and box prompts are selected from
    conservative category profiles in `src/glls/seg/sam3_profiles.py`.
@@ -122,6 +122,46 @@ source scripts/dev/activate_glls.sh
 sets `PYTHONPATH`, model paths, dataset paths, graph-cache paths, and the Python
 environment used by the helper scripts.
 
+Download the localizer artifacts used by the frontend:
+
+```bash
+# AdaptCLIP is used for 0-shot frontend runs and as the fallback localizer.
+mkdir -p "$GLLS_ADAPTCLIP_ROOT/checkpoints"
+# Download the upstream AdaptCLIP MVTec and VisA adapter checkpoints, then place:
+#   $GLLS_ADAPTCLIP_ROOT/checkpoints/mvtec_epoch_15.pth
+#   $GLLS_ADAPTCLIP_ROOT/checkpoints/visa_epoch_15.pth
+
+# ABounD 1-shot artifact for the published MVTec/VisA frontend path.
+hf download komorebi01/glls-abound-1shot \
+  --local-dir "$GLLS_ABOUND_SAVE_PATH"
+```
+
+The ABounD download should keep this layout:
+
+```text
+$GLLS_ABOUND_SAVE_PATH/
+  model_config.json
+  model/ViT-L-14-336px.pt
+  mvtec/final_vvclip_model_state_mvtec.pth
+  mvtec/final_soft_prompt_state_mvtec.pth
+  mvtec/final_memory_bank_mvtec.pt
+  visa/final_vvclip_model_state_visa.pth
+  visa/final_soft_prompt_state_visa.pth
+  visa/final_memory_bank_visa.pt
+```
+
+`scripts/dev/local_paths.example.sh` already points ABounD to the clean artifact
+path:
+
+```bash
+export GLLS_ABOUND_MODEL_PATH="$GLLS_DATA_ROOT/models/glls-abound-1shot/model"
+export GLLS_ABOUND_SAVE_PATH="$GLLS_DATA_ROOT/models/glls-abound-1shot"
+```
+
+Check the Hugging Face model card for the artifact license before redistributing
+the ABounD files. If no license is declared there, treat the artifact as
+research-use until the license is clarified.
+
 ## 📁 Repository Layout
 
 ```text
@@ -182,10 +222,12 @@ Recommended model resources:
 | CLIP backbone | [openai/clip-vit-large-patch14-336](https://huggingface.co/openai/clip-vit-large-patch14-336) or OpenCLIP-compatible ViT-L/14@336px weights | downloaded/cached by localizer |
 | AdaptCLIP | [gaobb/AdaptCLIP](https://github.com/gaobb/AdaptCLIP) adapter checkpoints | `GLLS_ADAPTCLIP_ROOT/checkpoints/<domain>_epoch_15.pth` |
 | Text embedding | [BAAI/bge-base-en-v1.5](https://huggingface.co/BAAI/bge-base-en-v1.5) | `GLLS_EMBEDDING_MODEL_PATH` |
-| ABounD optional | author-provided or locally trained ABounD checkpoint | `GLLS_ABOUND_MODEL_PATH` / `GLLS_ABOUND_SAVE_PATH` |
+| ABounD 1-shot | [komorebi01/glls-abound-1shot](https://huggingface.co/komorebi01/glls-abound-1shot), including `model_config.json` | `GLLS_ABOUND_MODEL_PATH` / `GLLS_ABOUND_SAVE_PATH` |
 
-The public default path is AdaptCLIP 1-shot local evidence with MCTS, SAM3, and
-PVLA/RAG. ABounD source is retained for explicit local runs.
+The frontend selects ABounD automatically for MVTec/VisA 1-shot inspection.
+MVTec/VisA 0-shot inspection and other frontend dataset/shot combinations use
+AdaptCLIP. Batch CLI runs remain explicit: pass `--localizer adaptclip` or
+`--localizer abound`.
 
 ## 🧩 Build PVLA Graph Knowledge
 
@@ -265,10 +307,15 @@ http://127.0.0.1:7861
 The frontend is designed for method playback rather than raw path debugging:
 
 1. Initialize the runtime from your local path config.
-2. Choose dataset, category, task, and QA row.
+2. Choose dataset, shot count, category, task, and QA row.
 3. Run GLLS and inspect the two-stage evidence flow: Phase-1 global report,
    small-model heatmap proposals, MCTS crop search, SAM3 structural cut/gate,
    source-backed PVLA/RAG recall, and Phase-2 answer fusion.
+
+For the published ABounD artifact path, choose `mvtec` or `visa` with `1-shot`
+in the frontend. The frontend will load ABounD from `GLLS_ABOUND_MODEL_PATH` and
+`GLLS_ABOUND_SAVE_PATH`. Choose `0-shot` for MVTec/VisA to use AdaptCLIP; other
+dataset/shot combinations also use AdaptCLIP.
 
 <p align="center">
   <img src="docs/assets/frontend/frontend_sample.png" alt="GLLS frontend sample selection" width="900">

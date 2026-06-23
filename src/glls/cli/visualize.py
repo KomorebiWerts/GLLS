@@ -67,6 +67,14 @@ def _resolve_adaptclip_checkpoint(path_value, dataset_name):
 
 DEFAULT_ADAPTCLIP_CHECKPOINT_PATH = _default_adaptclip_checkpoint("mvtec")
 
+
+def _frontend_localizer_name(dataset_name, k_shot):
+    dataset_key = str(dataset_name or "").strip().lower()
+    shot = int(k_shot or 0)
+    if dataset_key in {"mvtec", "visa"} and shot == 1:
+        return "abound"
+    return "adaptclip"
+
 # Try importing vLLM
 try:
     from vllm import LLM, SamplingParams
@@ -79,7 +87,7 @@ except ImportError:
 # Import Project Modules
 try:
     from glls.models.mcts_sam import MCTSQuestionSample
-    from glls.models.localizer import AdaptCLIP_Localizer
+    from glls.models.localizer import ABounD_Localizer, AdaptCLIP_Localizer
     from glls.qa_trace import binary_anomaly_decision_override, summarize_method_participation
     from glls.rag.agent import SimInspecAgent
     from glls.seg.sam3_engine import Sam3Engine
@@ -844,6 +852,7 @@ class GlobalSystem:
         self.is_initialized = False
         self.current_dataset = None
         self.current_ckpt = None
+        self.current_localizer = None
 
     def initialize(
         self,
@@ -858,8 +867,10 @@ class GlobalSystem:
         use_vllm,
         gpu_util,
         dataset_name,
+        k_shot=1,
     ):
         try:
+            k_shot = int(k_shot or 0)
             os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
             device = "cuda:0" if torch.cuda.is_available() else "cpu"
             
@@ -867,7 +878,15 @@ class GlobalSystem:
 
             # Initialize DatasetManager with the raw path; it handles resolution internally
             self.data_manager = DatasetManager(dataset_root, qa_root, dataset_name)
-            resolved_ckpt_path = _resolve_adaptclip_checkpoint(ckpt_path, dataset_name)
+            localizer_name = _frontend_localizer_name(dataset_name, k_shot)
+            if localizer_name == "abound":
+                resolved_ckpt_path = glls_paths.abound_model_path()
+                resolved_save_path = glls_paths.abound_save_path()
+                localizer_reload_key = f"{resolved_ckpt_path}|{resolved_save_path}"
+            else:
+                resolved_ckpt_path = _resolve_adaptclip_checkpoint(ckpt_path, dataset_name)
+                resolved_save_path = ""
+                localizer_reload_key = resolved_ckpt_path
             
             # Re-init VLM if params changed
             if self.vlm is None or self.vlm.model_type != model_type or self.vlm.model_path != model_path or self.vlm.use_vllm != use_vllm:
@@ -890,11 +909,12 @@ class GlobalSystem:
             localizer_needs_reload = (
                 self.localizer is None or 
                 self.current_dataset != dataset_name or 
-                self.current_ckpt != resolved_ckpt_path
+                self.current_localizer != localizer_name or
+                self.current_ckpt != localizer_reload_key
             )
 
             if localizer_needs_reload:
-                print(f"(Re)Loading AdaptCLIP Localizer for dataset: {dataset_name}...")
+                print(f"(Re)Loading {localizer_name} Localizer for dataset: {dataset_name}...")
                 if self.localizer:
                     del self.localizer
                     import gc
@@ -907,9 +927,9 @@ class GlobalSystem:
                 self.args.dataset_root = self.data_manager._resolve_dataset_root()
                 self.args.image_size = 518
                 self.args.checkpoint_path = resolved_ckpt_path
-                self.args.save_path = ""
-                self.args.k_shot = 1
-                self.args.localizer = "adaptclip"
+                self.args.save_path = resolved_save_path
+                self.args.k_shot = k_shot
+                self.args.localizer = localizer_name
                 
                 # Default params
                 self.args.features_list = [6, 12, 18, 24]
@@ -917,12 +937,21 @@ class GlobalSystem:
                 self.args.depth = 7; self.args.n_ctx = 11; self.args.spe = 4
                 self.args.w0 = 0.15; self.args.w1 = 0.35; self.args.w2 = 0.35; self.args.w3 = 0.15
                 
-                self.localizer = AdaptCLIP_Localizer(self.args, device=device)
+                if localizer_name == "abound":
+                    self.localizer = ABounD_Localizer(self.args, device=device)
+                else:
+                    self.localizer = AdaptCLIP_Localizer(self.args, device=device)
                 
                 self.current_dataset = dataset_name
-                self.current_ckpt = resolved_ckpt_path
+                self.current_ckpt = localizer_reload_key
+                self.current_localizer = localizer_name
             
-            if not self.rag_agent: 
+            if self.args is not None:
+                self.args.k_shot = k_shot
+            if self.localizer is not None:
+                self.localizer.k_shot = k_shot
+
+            if not self.rag_agent:
                 self.rag_agent = SimInspecAgent(None, graph_root, k_shot=1)
             
             if not self.sam_engine and os.path.exists(sam_path): 
@@ -931,9 +960,11 @@ class GlobalSystem:
             
             self.is_initialized = True
             vllm_status = f"ON (Util: {gpu_util})" if (use_vllm and self.vlm.use_vllm) else "OFF"
+            shot_mode = f"{k_shot}-shot ({'zero-shot' if k_shot <= 0 else 'few-shot'})"
+            localizer_label = "ABounD" if localizer_name == "abound" else "AdaptCLIP"
             return (
                 f"System ready | GPU:{gpu_id} | Model:{model_type} | vLLM:{vllm_status} | "
-                f"Dataset:{dataset_name} | Localizer:AdaptCLIP | QA:curated"
+                f"Dataset:{dataset_name} | Localizer:{localizer_label} {shot_mode} | QA:curated"
             )
         except Exception as e:
             import traceback
@@ -2053,6 +2084,11 @@ def create_ui():
                     value="qwen3-vl",
                 )
                 dd_gpu = gr.Dropdown([str(i) for i in range(8)], value="0", label="GPU")
+                dd_kshot = gr.Dropdown(
+                    ["1", "0"],
+                    value="1",
+                    label="Localizer shots (1 = one-shot, 0 = zero-shot)",
+                )
                 cb_vllm = gr.Checkbox(label="Use vLLM if installed", value=False, interactive=True)
                 sl_gpu_util = gr.Slider(0.3, 0.95, value=0.85, step=0.05, label="vLLM memory fraction")
             with gr.Row():
@@ -2064,7 +2100,7 @@ def create_ui():
             with gr.Row():
                 p_ckpt = gr.Textbox(
                     DEFAULT_ADAPTCLIP_CHECKPOINT_PATH,
-                    label="AdaptCLIP checkpoint",
+                    label="AdaptCLIP checkpoint (used when AdaptCLIP is selected)",
                 )
                 p_graph = gr.Textbox(DEFAULT_GRAPH_ROOT, label="PVLA graph cache root")
             btn_init = gr.Button("Initialize GLLS runtime", elem_classes="desk-btn-primary")
@@ -2200,8 +2236,8 @@ def create_ui():
         
         # 1. Initialize
         btn_init.click(
-            lambda pm, pl, pg, ps, pd, pq, gpu, mt, vlm, gu, dn: global_sys.initialize(pm, pl, pg, ps, pd, pq, gpu, mt, vlm, gu, dn), 
-            inputs=[p_model, p_ckpt, p_graph, p_sam, p_data, p_qa, dd_gpu, dd_model_type, cb_vllm, sl_gpu_util, dd_dataset], 
+            lambda pm, pl, pg, ps, pd, pq, gpu, mt, vlm, gu, dn, ks: global_sys.initialize(pm, pl, pg, ps, pd, pq, gpu, mt, vlm, gu, dn, ks),
+            inputs=[p_model, p_ckpt, p_graph, p_sam, p_data, p_qa, dd_gpu, dd_model_type, cb_vllm, sl_gpu_util, dd_dataset, dd_kshot],
             outputs=status_box,
             api_name=False,
         )

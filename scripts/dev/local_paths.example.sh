@@ -21,6 +21,8 @@ export GLLS_GRAPH_CACHE_ROOT="${GLLS_DATA_ROOT}/databases/graph_index"
 export GLLS_VLM_MODEL_PATH="${GLLS_DATA_ROOT}/models/qwen3-vl-8B"
 export GLLS_SAM3_PATH="${GLLS_DATA_ROOT}/models/sam3/sam3.pt"
 export GLLS_ADAPTCLIP_ROOT="${GLLS_DATA_ROOT}/models/AdaptCLIP"
+export GLLS_ABOUND_MODEL_PATH="${GLLS_DATA_ROOT}/models/glls-abound-1shot/model"
+export GLLS_ABOUND_SAVE_PATH="${GLLS_DATA_ROOT}/models/glls-abound-1shot"
 export GLLS_EMBEDDING_MODEL_PATH="${GLLS_DATA_ROOT}/models/bge-base-en-v1.5"
 
 # Optional binary AD datasets.
