@@ -317,24 +317,26 @@ in the frontend. The frontend will load ABounD from `GLLS_ABOUND_MODEL_PATH` and
 `GLLS_ABOUND_SAVE_PATH`. Choose `0-shot` for MVTec/VisA to use AdaptCLIP; other
 dataset/shot combinations also use AdaptCLIP.
 
+Representative frontend captures:
+
 <p align="center">
-  <img src="docs/assets/frontend/frontend_sample.png" alt="GLLS frontend sample selection" width="900">
+  <img src="docs/assets/frontend/frontend_pvla_cable.png" alt="GLLS frontend cable sample selection and PVLA graph-shaped knowledge" width="900">
 </p>
 
 <p align="center">
-  <img src="docs/assets/frontend/frontend_process_top.png" alt="GLLS frontend method playback top" width="900">
+  <img src="docs/assets/frontend/frontend_evidence_streams.png" alt="GLLS frontend global stream local search stream and fusion summary" width="900">
 </p>
 
 <p align="center">
-  <img src="docs/assets/frontend/frontend_process_bottom.png" alt="GLLS frontend method playback bottom" width="900">
+  <img src="docs/assets/frontend/frontend_run_visuals_cable.png" alt="GLLS frontend cable logic view anomaly heatmap and local evidence crops" width="900">
 </p>
 
 <p align="center">
-  <img src="docs/assets/frontend/frontend_evidence.png" alt="GLLS frontend heatmap SAM3 local evidence and PVLA panels" width="900">
+  <img src="docs/assets/frontend/frontend_pvla_pcb.png" alt="GLLS frontend PCB sample selection and PVLA graph-shaped knowledge" width="900">
 </p>
 
 <p align="center">
-  <img src="docs/assets/frontend/frontend_trace.png" alt="GLLS frontend prompt evidence trace" width="900">
+  <img src="docs/assets/frontend/frontend_run_visuals_pcb.png" alt="GLLS frontend PCB anomaly heatmap red-box trace and focus crop views" width="900">
 </p>
 
 ## ⚙️ Run MPDD / DTD / DAGM Binary AD

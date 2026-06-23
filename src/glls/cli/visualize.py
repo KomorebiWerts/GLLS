@@ -4,6 +4,7 @@ import os
 import sys
 import asyncio
 import numpy as np
+import math
 import cv2
 import socket
 import json
@@ -13,6 +14,7 @@ import base64
 import zipfile
 import re
 import html
+import pickle
 from datetime import datetime
 from io import BytesIO
 from collections import defaultdict
@@ -68,12 +70,110 @@ def _resolve_adaptclip_checkpoint(path_value, dataset_name):
 DEFAULT_ADAPTCLIP_CHECKPOINT_PATH = _default_adaptclip_checkpoint("mvtec")
 
 
-def _frontend_localizer_name(dataset_name, k_shot):
+def _normalize_dataset_name(dataset_name):
     dataset_key = str(dataset_name or "").strip().lower()
+    return "visa" if dataset_key == "visa" else "mvtec"
+
+
+def _parse_k_shot(k_shot):
+    try:
+        return int(k_shot or 0)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _frontend_localizer_name(dataset_name, k_shot):
+    dataset_key = _normalize_dataset_name(dataset_name)
     shot = int(k_shot or 0)
     if dataset_key in {"mvtec", "visa"} and shot == 1:
         return "abound"
     return "adaptclip"
+
+
+def _normalize_localizer_choice(localizer_choice, dataset_name, k_shot):
+    choice = str(localizer_choice or "Auto").strip().lower().replace("-", "").replace("_", "")
+    if choice in {"auto", ""}:
+        return _frontend_localizer_name(dataset_name, k_shot)
+    if choice == "abound":
+        return "abound"
+    if choice == "adaptclip":
+        return "adaptclip"
+    return _frontend_localizer_name(dataset_name, k_shot)
+
+
+def _abound_dataset_weight_paths(save_path, dataset_name):
+    dataset_key = _normalize_dataset_name(dataset_name)
+    return {
+        "lora": os.path.join(save_path, dataset_key, f"final_vvclip_model_state_{dataset_key}.pth"),
+        "soft_prompt": os.path.join(save_path, dataset_key, f"final_soft_prompt_state_{dataset_key}.pth"),
+        "memory_bank": os.path.join(save_path, dataset_key, f"final_memory_bank_{dataset_key}.pt"),
+    }
+
+
+def _runtime_weight_config(dataset_name, localizer_choice, k_shot, adaptclip_ckpt_path):
+    dataset_key = _normalize_dataset_name(dataset_name)
+    shot = _parse_k_shot(k_shot)
+    localizer_name = _normalize_localizer_choice(localizer_choice, dataset_key, shot)
+
+    if localizer_name == "abound" and shot != 1:
+        raise ValueError("ABounD is available only for 1-shot runtime. Use AdaptCLIP for 0-shot.")
+
+    dataset_weight_paths = {}
+    if localizer_name == "abound":
+        checkpoint_path = glls_paths.abound_model_path()
+        save_path = glls_paths.abound_save_path()
+        dataset_weight_paths = _abound_dataset_weight_paths(save_path, dataset_key)
+    else:
+        checkpoint_path = _resolve_adaptclip_checkpoint(adaptclip_ckpt_path, dataset_key)
+        save_path = ""
+        dataset_weight_paths = {"checkpoint": checkpoint_path}
+
+    signature_payload = {
+        "dataset": dataset_key,
+        "localizer": localizer_name,
+        "k_shot": shot,
+        "checkpoint_path": checkpoint_path,
+        "save_path": save_path,
+        "dataset_weight_paths": dataset_weight_paths,
+    }
+    signature = json.dumps(signature_payload, sort_keys=True)
+    return {
+        "dataset_name": dataset_key,
+        "localizer_name": localizer_name,
+        "k_shot": shot,
+        "checkpoint_path": checkpoint_path,
+        "save_path": save_path,
+        "dataset_weight_paths": dataset_weight_paths,
+        "signature": signature,
+    }
+
+
+def _runtime_weight_summary(config):
+    localizer_label = "ABounD" if config["localizer_name"] == "abound" else "AdaptCLIP"
+    lines = [
+        f"Dataset: {config['dataset_name']}",
+        f"Localizer: {localizer_label} | Shot: {config['k_shot']}",
+    ]
+    if config["localizer_name"] == "abound":
+        weights = config["dataset_weight_paths"]
+        lines.extend([
+            f"Backbone: {config['checkpoint_path']}",
+            f"LoRA: {weights['lora']}",
+            f"Soft prompt: {weights['soft_prompt']}",
+            f"Memory bank: {weights['memory_bank']}",
+        ])
+    else:
+        lines.append(f"Checkpoint: {config['checkpoint_path']}")
+    return "\n".join(lines)
+
+
+def _runtime_config_error_html(message):
+    return (
+        "<div class='method-process-card'>"
+        "<h3>Runtime configuration required</h3>"
+        f"<p>{_html(message)}</p>"
+        "</div>"
+    )
 
 # Try importing vLLM
 try:
@@ -853,6 +953,9 @@ class GlobalSystem:
         self.current_dataset = None
         self.current_ckpt = None
         self.current_localizer = None
+        self.current_k_shot = None
+        self.current_runtime_signature = None
+        self.current_weight_config = None
 
     def initialize(
         self,
@@ -868,25 +971,27 @@ class GlobalSystem:
         gpu_util,
         dataset_name,
         k_shot=1,
+        localizer_choice="Auto",
     ):
         try:
-            k_shot = int(k_shot or 0)
+            weight_config = _runtime_weight_config(dataset_name, localizer_choice, k_shot, ckpt_path)
+            dataset_name = weight_config["dataset_name"]
+            k_shot = weight_config["k_shot"]
+            localizer_name = weight_config["localizer_name"]
+            resolved_ckpt_path = weight_config["checkpoint_path"]
+            resolved_save_path = weight_config["save_path"]
+            localizer_reload_key = weight_config["signature"]
             os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
             device = "cuda:0" if torch.cuda.is_available() else "cpu"
             
-            print(f"System Config: physical_gpu={gpu_id} | logical_device={device} | dataset={dataset_name}")
+            print(
+                "System Config: "
+                f"physical_gpu={gpu_id} | logical_device={device} | dataset={dataset_name} | "
+                f"localizer={localizer_name} | k_shot={k_shot}"
+            )
 
             # Initialize DatasetManager with the raw path; it handles resolution internally
             self.data_manager = DatasetManager(dataset_root, qa_root, dataset_name)
-            localizer_name = _frontend_localizer_name(dataset_name, k_shot)
-            if localizer_name == "abound":
-                resolved_ckpt_path = glls_paths.abound_model_path()
-                resolved_save_path = glls_paths.abound_save_path()
-                localizer_reload_key = f"{resolved_ckpt_path}|{resolved_save_path}"
-            else:
-                resolved_ckpt_path = _resolve_adaptclip_checkpoint(ckpt_path, dataset_name)
-                resolved_save_path = ""
-                localizer_reload_key = resolved_ckpt_path
             
             # Re-init VLM if params changed
             if self.vlm is None or self.vlm.model_type != model_type or self.vlm.model_path != model_path or self.vlm.use_vllm != use_vllm:
@@ -945,11 +1050,19 @@ class GlobalSystem:
                 self.current_dataset = dataset_name
                 self.current_ckpt = localizer_reload_key
                 self.current_localizer = localizer_name
-            
+                self.current_k_shot = k_shot
+                self.current_runtime_signature = localizer_reload_key
+                self.current_weight_config = weight_config
+
+            # AdaptCLIP can switch shots without a reload. ABounD is selected only
+            # for mvtec/visa 1-shot, so a shot change has already reloaded above.
             if self.args is not None:
                 self.args.k_shot = k_shot
             if self.localizer is not None:
                 self.localizer.k_shot = k_shot
+            self.current_k_shot = k_shot
+            self.current_runtime_signature = localizer_reload_key
+            self.current_weight_config = weight_config
 
             if not self.rag_agent:
                 self.rag_agent = SimInspecAgent(None, graph_root, k_shot=1)
@@ -962,14 +1075,35 @@ class GlobalSystem:
             vllm_status = f"ON (Util: {gpu_util})" if (use_vllm and self.vlm.use_vllm) else "OFF"
             shot_mode = f"{k_shot}-shot ({'zero-shot' if k_shot <= 0 else 'few-shot'})"
             localizer_label = "ABounD" if localizer_name == "abound" else "AdaptCLIP"
+            weight_note = os.path.basename(weight_config["dataset_weight_paths"].get("memory_bank", resolved_ckpt_path))
             return (
                 f"System ready | GPU:{gpu_id} | Model:{model_type} | vLLM:{vllm_status} | "
-                f"Dataset:{dataset_name} | Localizer:{localizer_label} {shot_mode} | QA:curated"
+                f"Dataset:{dataset_name} | Localizer:{localizer_label} {shot_mode} | Weights:{weight_note} | QA:curated"
             )
         except Exception as e:
             import traceback
             traceback.print_exc()
             return f"Init failed: {str(e)}"
+
+    def runtime_match_status(self, dataset_name, localizer_choice, k_shot, ckpt_path):
+        try:
+            expected = _runtime_weight_config(dataset_name, localizer_choice, k_shot, ckpt_path)
+        except Exception as e:
+            return False, None, str(e)
+        if not self.is_initialized:
+            return False, expected, "Runtime is not initialized for the selected method configuration."
+        if self.current_runtime_signature != expected["signature"]:
+            loaded = _runtime_weight_summary(self.current_weight_config) if self.current_weight_config else "No runtime loaded."
+            expected_text = _runtime_weight_summary(expected)
+            return (
+                False,
+                expected,
+                "Runtime weights do not match the selected dataset/localizer/shot.\n\n"
+                f"Loaded runtime:\n{loaded}\n\n"
+                f"Selected runtime:\n{expected_text}\n\n"
+                "Click Initialize runtime before running GLLS.",
+            )
+        return True, expected, "Runtime matches the selected method configuration."
 
 global_sys = GlobalSystem()
 
@@ -1127,32 +1261,573 @@ def _item_list_html(items, empty_text):
         rows = [f"<li>{_html(empty_text)}</li>"]
     return "<ul>" + "".join(rows) + "</ul>"
 
-def _method_process_placeholder():
-    stages = [
-        ("01", "Phase-1 Global Logic", "Original image + QA are inspected first to form a global structural report."),
-        ("02", "Small Localizer + MCTS", "AdaptCLIP heatmap proposals drive MCTS region search and crop selection."),
-        ("03", "SAM3 Structural Gate", "Category prompts and mask quality checks refine reliable structural cutouts."),
-        ("04", "PVLA / RAG Recall", "Graph cache, text knowledge, and visual references are retrieved with source provenance."),
-        ("05", "Phase-2 Fusion", "Global report, local crops, SAM3 evidence, and PVLA blocks are fused for the final answer."),
-    ]
-    cards = []
-    for step, title, body in stages:
-        cards.append(
-            '<article class="method-stage muted">'
-            f'<div class="stage-head"><span>{step}</span><h4>{_html(title)}</h4></div>'
-            f"<p>{_html(body)}</p>"
-            "</article>"
-        )
+def _chip_html(label, value, tone=""):
+    tone_class = f" {tone}" if tone else ""
     return (
-        '<div class="method-process-card">'
-        '<div class="process-head"><div><p class="eyebrow">Method playback</p>'
-        '<h3>Run a QA row to replay the GLLS evidence flow</h3></div>'
-        '<span class="process-badge">Waiting</span></div>'
-        '<div class="method-stage-grid">' + "".join(cards) + "</div>"
+        f'<span class="evidence-chip{tone_class}">'
+        f"<b>{_html(label)}</b><em>{_html(value)}</em>"
+        "</span>"
+    )
+
+def _mini_list_html(items, empty_text, limit=5):
+    rows = []
+    for item in _first_items(items, limit):
+        rows.append(f"<li>{_html(item)}</li>")
+    if not rows:
+        rows = [f"<li>{_html(empty_text)}</li>"]
+    return "<ul>" + "".join(rows) + "</ul>"
+
+def load_pvla_graph_summary(category):
+    category = _as_text(category).strip()
+    summary = {
+        "category": category or "selected category",
+        "path": "",
+        "status": "waiting for a loaded category",
+        "node_count": 0,
+        "edge_count": 0,
+        "nodes": [],
+        "edges": [],
+        "node_details": [],
+        "edge_details": [],
+        "source": "",
+        "dataset": "",
+    }
+    if not category:
+        return summary
+
+    graph_path = os.path.join(DEFAULT_GRAPH_ROOT, f"{category}_graph.pkl")
+    summary["path"] = graph_path
+    if not os.path.exists(graph_path):
+        summary["status"] = "graph cache not found"
+        return summary
+
+    try:
+        with open(graph_path, "rb") as f:
+            payload = pickle.load(f)
+        graph = payload.get("graph") if isinstance(payload, dict) else payload
+        metadata = payload.get("source_metadata", {}) if isinstance(payload, dict) else {}
+        node_names = payload.get("node_names", []) if isinstance(payload, dict) else []
+
+        if hasattr(graph, "nodes"):
+            graph_nodes = list(graph.nodes(data=True))
+            graph_edges = list(graph.edges(data=True))
+            names = node_names or [str(node) for node, _ in graph_nodes]
+            node_details = []
+            for node_id, data in graph_nodes:
+                data = data or {}
+                label = data.get("label") or data.get("short_name") or _source_label(str(node_id)) or str(node_id)
+                image_paths = data.get("image_paths") or data.get("images") or []
+                if isinstance(image_paths, str):
+                    image_paths = [image_paths]
+                node_details.append(
+                    {
+                        "id": str(node_id),
+                        "label": str(label),
+                        "type": str(data.get("type") or "node"),
+                        "images": [str(path) for path in image_paths[:4]],
+                    }
+                )
+            edge_details = []
+            for src, dst, data in graph_edges:
+                data = data or {}
+                edge_details.append(
+                    {
+                        "source": str(src),
+                        "target": str(dst),
+                        "relation": str(data.get("relation") or "linked"),
+                    }
+                )
+            summary["node_details"] = node_details
+            summary["edge_details"] = edge_details
+            summary["nodes"] = [str(name) for name in names[:10]]
+            summary["edges"] = [
+                f"{_source_label(str(src))} -> {_source_label(str(dst))}"
+                for src, dst, *_ in graph_edges[:10]
+            ]
+            summary["node_count"] = len(graph_nodes)
+            summary["edge_count"] = len(graph_edges)
+        else:
+            summary["nodes"] = [str(node) for node in node_names[:10]]
+            summary["node_count"] = len(node_names)
+
+        summary["source"] = _source_label(metadata.get("source_json_path", ""))
+        summary["dataset"] = _as_text(metadata.get("dataset", ""))
+        summary["status"] = "loaded"
+    except Exception as e:
+        summary["status"] = f"graph read failed: {_short_text(e, 90)}"
+    return summary
+
+def _atlas_node_tone(node_type):
+    text = _as_text(node_type).lower()
+    if "root" in text or "class" in text:
+        return "root"
+    if "defect" in text or "anomaly" in text:
+        return "defect"
+    if "normal" in text:
+        return "source"
+    if "region" in text or "part" in text:
+        return "region"
+    if "image" in text or "source" in text:
+        return "source"
+    return "node"
+
+
+_ATLAS_TONE_KIND = {
+    "root": "class",
+    "region": "part",
+    "source": "normal",
+    "defect": "defect",
+    "node": "node",
+}
+
+
+def _atlas_clean_label(node, fallback="node"):
+    """Region nodes carry an empty label, so fall back to a tidied id."""
+    raw = _as_text(node.get("label")).strip()
+    if not raw:
+        raw = _as_text(node.get("id")).strip()
+    raw = raw.replace("_", " ").strip()
+    if raw.lower().startswith("part "):
+        raw = raw[5:].strip() or raw
+    return raw or fallback
+
+
+def _box_edge_point(cx, cy, half_w, half_h, tx, ty):
+    """Point where the line from (cx, cy) toward (tx, ty) crosses the node box."""
+    dx, dy = tx - cx, ty - cy
+    if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+        return cx, cy
+    scale = float("inf")
+    if abs(dx) > 1e-6:
+        scale = min(scale, half_w / abs(dx))
+    if abs(dy) > 1e-6:
+        scale = min(scale, half_h / abs(dy))
+    return cx + dx * scale, cy + dy * scale
+
+
+def _atlas_svg_node(node, cx, cy, width, height):
+    """Render a single pill node centered on (cx, cy)."""
+    tone = _atlas_node_tone(node.get("type", "node"))
+    label = _short_text(_atlas_clean_label(node), 40 if tone == "root" else 26)
+    kind = _ATLAS_TONE_KIND.get(tone, "node")
+    x = cx - width / 2.0
+    y = cy - height / 2.0
+    return (
+        f'<foreignObject x="{x:.1f}" y="{y:.1f}" width="{width:.1f}" height="{height:.1f}">'
+        f'<div xmlns="http://www.w3.org/1999/xhtml" class="atlas-node {tone}" title="{_html(label)}">'
+        '<i class="atlas-dot"></i>'
+        f'<span class="atlas-node-text"><em>{_html(kind)}</em><strong>{_html(label)}</strong></span>'
+        "</div></foreignObject>"
+    )
+
+
+def render_pvla_atlas_graph(atlas):
+    """Lay out the PVLA category graph as a hub-and-ring diagram.
+
+    Class node in the center, part/region nodes on an inner ring, and defect
+    patterns evenly spaced on an outer ring (ordered by parent part so links
+    fan out cleanly). Positions are computed so node boxes never overlap.
+    """
+    nodes = atlas.get("node_details") or []
+    category = atlas.get("category") or "selected category"
+    if not nodes:
+        nodes = [{"id": category, "label": category, "type": "root", "images": []}]
+
+    # ---- Bucket nodes by semantic role (Class / Part / Defect) ----
+    root = next((n for n in nodes if _atlas_node_tone(n.get("type")) == "root"), None)
+    if root is None:
+        root = nodes[0]
+    root_id = root.get("id")
+
+    regions, defects = [], []
+    for n in nodes:
+        if n.get("id") == root_id:
+            continue
+        tone = _atlas_node_tone(n.get("type"))
+        if tone == "defect":
+            defects.append(n)
+        elif tone in ("region", "source"):
+            regions.append(n)
+        # generic / composite (untyped) nodes are skipped to keep the view legible
+
+    MAX_REGIONS, MAX_DEFECTS = 6, 14
+    region_total, defect_total = len(regions), len(defects)
+    regions = regions[:MAX_REGIONS]
+    defects = defects[:MAX_DEFECTS]
+    region_ids = {r.get("id") for r in regions}
+    defect_ids = {d.get("id") for d in defects}
+
+    # ---- Attach each defect to a parent region (edges first, id-prefix fallback) ----
+    edge_details = atlas.get("edge_details") or []
+    parent_of = {}
+    for edge in edge_details:
+        s, d = edge.get("source"), edge.get("target")
+        rel = _as_text(edge.get("relation")).lower()
+        if "anomaly" not in rel and "region" not in rel and "has" not in rel:
+            continue
+        if d in defect_ids and s in region_ids:
+            parent_of.setdefault(d, s)
+        elif s in defect_ids and d in region_ids:
+            parent_of.setdefault(s, d)
+    for d in defects:
+        did = d.get("id")
+        if did in parent_of:
+            continue
+        best = None
+        for r in regions:
+            rid = _as_text(r.get("id"))
+            if rid and _as_text(did).startswith(rid):
+                if best is None or len(rid) > len(_as_text(best)):
+                    best = r.get("id")
+        if best:
+            parent_of[did] = best
+
+    region_index = {r.get("id"): i for i, r in enumerate(regions)}
+    defects_ordered = sorted(
+        defects,
+        key=lambda d: (region_index.get(parent_of.get(d.get("id")), len(regions)),),
+    )
+
+    # ---- Geometry (viewBox units) ----
+    W, H = 900.0, 620.0
+    cx, cy = W / 2.0, H / 2.0
+    R_REGION, R_DEFECT = 152.0, 288.0
+    ROOT_W, ROOT_H = 150.0, 52.0
+    REGION_W, REGION_H = 138.0, 44.0
+    DEFECT_W, DEFECT_H = 118.0, 40.0
+    TOP = -math.pi / 2.0
+
+    pos, half = {}, {}
+    pos[root_id] = (cx, cy)
+    half[root_id] = (ROOT_W / 2.0, ROOT_H / 2.0)
+
+    # Defects: even angular spread on the outer ring (grouped order keeps links short)
+    defect_angle = {}
+    n_def = max(1, len(defects_ordered))
+    for i, d in enumerate(defects_ordered):
+        ang = TOP + 2.0 * math.pi * i / n_def
+        defect_angle[d.get("id")] = ang
+        pos[d.get("id")] = (cx + R_DEFECT * math.cos(ang), cy + R_DEFECT * math.sin(ang))
+        half[d.get("id")] = (DEFECT_W / 2.0, DEFECT_H / 2.0)
+
+    # Regions: placed at the angular centroid of their defects (fallback: even spread)
+    fallback_slots = [TOP + 2.0 * math.pi * k / max(1, len(regions)) for k in range(len(regions))]
+    for i, r in enumerate(regions):
+        rid = r.get("id")
+        child_angles = [defect_angle[d.get("id")] for d in defects_ordered if parent_of.get(d.get("id")) == rid]
+        if child_angles:
+            sxc = sum(math.cos(a) for a in child_angles)
+            syc = sum(math.sin(a) for a in child_angles)
+            ang = math.atan2(syc, sxc) if (abs(sxc) > 1e-9 or abs(syc) > 1e-9) else fallback_slots[i]
+        else:
+            ang = fallback_slots[i]
+        pos[rid] = (cx + R_REGION * math.cos(ang), cy + R_REGION * math.sin(ang))
+        half[rid] = (REGION_W / 2.0, REGION_H / 2.0)
+
+    displayed = set(pos.keys())
+
+    # ---- Edges (hierarchy vs distinct_from) ----
+    hierarchy, diffs = [], []
+    have_edges = False
+    for edge in edge_details:
+        s, d = edge.get("source"), edge.get("target")
+        if s not in displayed or d not in displayed or s == d:
+            continue
+        rel = _as_text(edge.get("relation")).lower()
+        if "distinct" in rel or "diff" in rel:
+            diffs.append((s, d))
+        else:
+            hierarchy.append((s, d))
+        have_edges = True
+    if not have_edges:
+        hierarchy = [(root_id, r.get("id")) for r in regions]
+        for d in defects_ordered:
+            hierarchy.append((parent_of.get(d.get("id")) or root_id, d.get("id")))
+    existing = {frozenset((s, d)) for s, d in hierarchy}
+    for r in regions:
+        if frozenset((root_id, r.get("id"))) not in existing:
+            hierarchy.append((root_id, r.get("id")))
+
+    def _link(s, d, cls):
+        sx, sy = pos[s]
+        dx, dy = pos[d]
+        shw, shh = half[s]
+        dhw, dhh = half[d]
+        x1, y1 = _box_edge_point(sx, sy, shw + 2, shh + 2, dx, dy)
+        x2, y2 = _box_edge_point(dx, dy, dhw + 5, dhh + 5, sx, sy)
+        return f'<line class="atlas-link {cls}" x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" />'
+
+    link_markup = [_link(s, d, "hier") for s, d in hierarchy[:48]]
+    diff_markup = [_link(s, d, "diff") for s, d in diffs[:8]]
+
+    rings = (
+        f'<circle class="atlas-ring" cx="{cx:.0f}" cy="{cy:.0f}" r="{R_REGION:.0f}" />'
+        f'<circle class="atlas-ring" cx="{cx:.0f}" cy="{cy:.0f}" r="{R_DEFECT:.0f}" />'
+    )
+
+    node_markup = [_atlas_svg_node(root, cx, cy, ROOT_W, ROOT_H)]
+    for r in regions:
+        x, y = pos[r.get("id")]
+        node_markup.append(_atlas_svg_node(r, x, y, REGION_W, REGION_H))
+    for d in defects_ordered:
+        x, y = pos[d.get("id")]
+        node_markup.append(_atlas_svg_node(d, x, y, DEFECT_W, DEFECT_H))
+
+    legend = (
+        '<div class="atlas-legend">'
+        '<span class="atlas-leg root"><i></i>Class</span>'
+        '<span class="atlas-leg region"><i></i>Part / region</span>'
+        '<span class="atlas-leg defect"><i></i>Defect pattern</span>'
+        '<span class="atlas-leg diff"><i></i>distinct_from</span>'
         "</div>"
     )
 
-def _method_process_html(debug_meta, final_prompt=""):
+    overflow_bits = []
+    if region_total > len(regions):
+        overflow_bits.append(f"+{region_total - len(regions)} more parts")
+    if defect_total > len(defects):
+        overflow_bits.append(f"+{defect_total - len(defects)} more defects")
+    overflow = (
+        '<p class="atlas-overflow">'
+        f"{len(regions)} parts · {len(defects)} defect patterns"
+        + (" · " + ", ".join(overflow_bits) if overflow_bits else "")
+        + "</p>"
+    )
+
+    return (
+        '<div class="atlas-graph-wrap" aria-label="PVLA graph overview">'
+        + legend
+        + f'<svg class="atlas-graph-svg" viewBox="0 0 {int(W)} {int(H)}" role="img" preserveAspectRatio="xMidYMid meet">'
+        + '<defs><marker id="atlas-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" '
+        'orient="auto" markerUnits="userSpaceOnUse">'
+        + '<path d="M0,0 L9,4 L0,8 Z"></path></marker></defs>'
+        + rings
+        + "".join(link_markup)
+        + "".join(diff_markup)
+        + "".join(node_markup)
+        + "</svg>"
+        + overflow
+        + "</div>"
+    )
+
+def _resolve_pvla_image_path(stored_path, graph_path=""):
+    """Re-root a build-machine image path (e.g. /home/<other>/.../img/...) onto
+    the local img/ directory that sits next to the loaded graph cache."""
+    p = _as_text(stored_path).strip()
+    if not p:
+        return None
+    if os.path.exists(p):
+        return p
+    norm = p.replace("\\", "/")
+    suffix = None
+    for marker in ("/databases/img/", "/img/"):
+        if marker in norm:
+            suffix = norm.split(marker, 1)[1]
+            break
+    if not suffix:
+        return None
+    bases = []
+    gp = _as_text(graph_path).replace("\\", "/")
+    if gp:
+        bases.append(os.path.join(os.path.dirname(os.path.dirname(gp)), "img"))
+        bases.append(os.path.join(os.path.dirname(gp), "img"))
+    bases.append(os.path.join(os.path.dirname(_as_text(DEFAULT_GRAPH_ROOT)), "img"))
+    for base in bases:
+        candidate = os.path.join(base, suffix)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _pvla_thumb_data_uri(path, max_px=150):
+    """Load, downscale, and base64-encode an image so it renders inside gr.HTML."""
+    try:
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            im.thumbnail((max_px, max_px))
+            bio = BytesIO()
+            im.save(bio, format="JPEG", quality=80)
+        return "data:image/jpeg;base64," + base64.b64encode(bio.getvalue()).decode("utf-8")
+    except Exception:
+        return None
+
+
+def _atlas_part_crops_html(atlas):
+    """Show the actual reference crops linked to part/region nodes. Defect-pattern
+    nodes are text-only by design, so they are summarized as a count, not listed."""
+    graph_path = atlas.get("path", "")
+    cards = []
+    defect_count = 0
+    for node in atlas.get("node_details") or []:
+        tone = _atlas_node_tone(node.get("type"))
+        if tone == "defect":
+            defect_count += 1
+            continue
+        if tone not in ("region", "source"):
+            continue
+        uri = None
+        for raw in node.get("images", []):
+            local = _resolve_pvla_image_path(raw, graph_path)
+            if local:
+                uri = _pvla_thumb_data_uri(local)
+                if uri:
+                    break
+        label = _atlas_clean_label(node)
+        if uri:
+            inner = f'<img src="{uri}" alt="{_html(label)}" loading="lazy" />'
+        else:
+            inner = '<span class="atlas-crop-missing">crop unavailable</span>'
+        cards.append(
+            f'<figure class="atlas-crop"><div class="atlas-crop-img">{inner}</div>'
+            f"<figcaption>{_html(label)}</figcaption></figure>"
+        )
+    if not cards:
+        return '<p class="atlas-crop-empty">Part reference crops appear once a category graph is loaded.</p>'
+    note = ""
+    if defect_count:
+        note = (
+            f'<p class="atlas-crop-note">{defect_count} defect patterns are text-only '
+            "(visual signature &amp; contrast); they have no reference crop by design.</p>"
+        )
+    return '<div class="atlas-crop-grid">' + "".join(cards) + "</div>" + note
+
+
+def _atlas_detail_html(atlas, rag_blocks, regions, source, dataset, graph_sources):
+    edge_rows = []
+    for edge in (atlas.get("edge_details") or [])[:12]:
+        edge_rows.append(
+            f"<li><code>{_html(_source_label(edge.get('source')))}</code> "
+            f"-> <code>{_html(_source_label(edge.get('target')))}</code> "
+            f"<em>{_html(edge.get('relation'))}</em></li>"
+        )
+    if not edge_rows:
+        edge_rows.append("<li>No graph edges loaded yet.</li>")
+
+    prov_rows = []
+    regions_text = ", ".join(_first_items(regions, 5))
+    graph_cache = ", ".join(_first_items(graph_sources, 2)) or _source_label(atlas.get("path", ""))
+    for label, value in [
+        ("Knowledge source", source),
+        ("Dataset", dataset),
+        ("RAG regions", regions_text),
+        ("Graph cache", graph_cache),
+    ]:
+        value = _as_text(value).strip()
+        if value:
+            prov_rows.append(f"<p><b>{_html(label)}</b><br>{_html(value)}</p>")
+    if not prov_rows:
+        prov_rows.append(f'<p><b>Status</b><br>{_html(atlas.get("status", "not loaded"))}</p>')
+
+    return (
+        '<details class="atlas-details">'
+        "<summary>Open PVLA part crops, edges, and recall provenance</summary>"
+        '<div class="atlas-detail-grid">'
+        "<div><h4>Part reference crops</h4>" + _atlas_part_crops_html(atlas) + "</div>"
+        '<div><h4>Graph edges</h4><ul>' + "".join(edge_rows) + "</ul></div>"
+        "<div><h4>Recall provenance</h4>" + "".join(prov_rows) + "</div>"
+        "</div></details>"
+    )
+
+def _atlas_panel_html(category, rag_blocks=None):
+    atlas = load_pvla_graph_summary(category)
+    rag_blocks = rag_blocks or []
+    regions = []
+    graph_sources = []
+    text_sources = []
+    for block in rag_blocks:
+        if not isinstance(block, dict):
+            continue
+        if block.get("region"):
+            regions.append(str(block["region"]))
+        if block.get("graph_cache_path"):
+            graph_sources.append(_source_label(block["graph_cache_path"]))
+        if block.get("source_json_path"):
+            text_sources.append(_source_label(block["source_json_path"]))
+
+    source = atlas.get("source") or ", ".join(_first_items(text_sources, 2))
+    dataset = atlas.get("dataset")
+    graph_bits = (
+        _chip_html("category", atlas["category"], "pvla")
+        + _chip_html("nodes", atlas.get("node_count", 0), "pvla")
+        + _chip_html("edges", atlas.get("edge_count", 0), "pvla")
+        + _chip_html("status", atlas.get("status", "unknown"), "pvla")
+    )
+    return (
+        '<section class="stream-panel atlas-panel">'
+        '<div class="stream-heading"><div><p class="eyebrow">offline atlas</p>'
+        '<h3>PVLA graph-shaped knowledge</h3>'
+        '<p>Part, normal-reference, and defect knowledge are recalled as a category graph before the final verifier sees the case.</p>'
+        '</div></div>'
+        f'<div class="chip-row">{graph_bits}</div>'
+        + render_pvla_atlas_graph(atlas)
+        + _atlas_detail_html(atlas, rag_blocks, regions, source, dataset, graph_sources)
+        + '</section>'
+    )
+
+def render_dual_stream_placeholder(category=None):
+    return (
+        '<div class="dual-board-html">'
+        '<div class="board-head"><div><p class="eyebrow">demo board</p>'
+        '<h2>Dual-stream verification is ready for a QA sample</h2>'
+        '<p>Select a dataset/category on the left, then run GLLS to fill the board with graph knowledge, heatmap search, local crops, and the final verifier decision.</p>'
+        '</div><span class="process-badge">Waiting for run</span></div>'
+        '<div class="board-grid">'
+        + _atlas_panel_html(category)
+        + '<section class="stream-panel global-panel"><div class="stream-heading"><p class="eyebrow">stream 1</p><h3>Global & logic stream</h3><p>Whole-image reasoning and structural checks appear here after runtime execution.</p></div></section>'
+        + '<section class="stream-panel action-panel"><div class="stream-heading"><p class="eyebrow">stream 2</p><h3>Fine-grained & actions stream</h3><p>AdaptCLIP heatmap, MCTS search, and Top-K crops are paired here instead of split across separate cards.</p></div></section>'
+        + '<section class="stream-panel fusion-panel"><div class="stream-heading"><p class="eyebrow">fusion</p><h3>Cross-stream evidence handoff</h3><p>Only selected global, local, and PVLA evidence is passed to the Phase-2 verifier.</p></div></section>'
+        + '<section class="stream-panel verdict-panel"><div class="stream-heading"><p class="eyebrow">verdict</p><h3>Final answer</h3><p>The constrained multiple-choice result and evidence badges appear here after a run.</p></div></section>'
+        '</div></div>'
+    )
+
+def _mcts_action_viz_html(mcts_search, action_trace, mcts_status):
+    """Render the MCTS action budget as labelled bars (Move / Zoom / Stop)."""
+    counts = (mcts_search or {}).get("expanded_action_counts", {}) or {}
+    families = {"Move": 0, "Zoom": 0, "Stop": 0}
+    for key, value in counts.items():
+        name = str(key).lower()
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = 0
+        if "move" in name:
+            families["Move"] += value
+        elif "zoom" in name:
+            families["Zoom"] += value
+        elif "stop" in name or "terminal" in name:
+            families["Stop"] += value
+    terminal = int((mcts_search or {}).get("terminal_iterations", 0) or 0)
+    if terminal and families["Stop"] == 0:
+        families["Stop"] = terminal
+    iterations = int((mcts_search or {}).get("iterations_recorded", len(action_trace or [])) or 0)
+    max_depth = (mcts_search or {}).get("max_path_depth", (mcts_search or {}).get("max_selection_depth", ""))
+
+    if iterations == 0 and sum(families.values()) == 0 and not counts:
+        return (
+            '<div class="mcts-viz empty">MCTS search was not triggered for this task '
+            f"(<code>{_html(mcts_status)}</code>); the global stream answered directly.</div>"
+        )
+
+    icons = {"Move": "&#8596;", "Zoom": "&#8853;", "Stop": "&#9632;"}
+    peak = max(1, max(families.values()))
+    bars = []
+    for name in ("Move", "Zoom", "Stop"):
+        count = families[name]
+        pct = int(round(100 * count / peak))
+        bars.append(
+            f'<div class="mcts-act {name.lower()}">'
+            f'<span class="mcts-act-h"><i>{icons[name]}</i>{name}<b>{count}</b></span>'
+            f'<span class="mcts-bar"><span style="width:{pct}%"></span></span></div>'
+        )
+    meta = (
+        f'<div class="mcts-viz-meta">{iterations} search iterations'
+        + (f" &middot; max depth {_html(max_depth)}" if _as_text(max_depth) else "")
+        + "</div>"
+    )
+    return '<div class="mcts-viz">' + "".join(bars) + meta + "</div>"
+
+
+def render_dual_stream_trace(debug_meta, final_prompt="", category=""):
     debug_meta = debug_meta or {}
     participation = summarize_method_participation(debug_meta)
     mcts_budget = debug_meta.get("mcts_budget_config", {}) or {}
@@ -1237,8 +1912,11 @@ def _method_process_html(debug_meta, final_prompt=""):
         )
     else:
         mcts_budget_text = _compact_json(mcts_budget, 120) or "not recorded"
-    heatmap_score = debug_meta.get("heatmap_score", debug_meta.get("heatmap_peak_score", 0))
-    threshold = debug_meta.get("threshold_used", debug_meta.get("anomaly_threshold", 0))
+    heatmap_peak = debug_meta.get("heatmap_peak_score", debug_meta.get("heatmap_score", 0))
+    try:
+        heatmap_peak_text = f"{float(heatmap_peak):.3f}"
+    except (TypeError, ValueError):
+        heatmap_peak_text = _as_text(heatmap_peak) or "n/a"
     selected_regions = []
     prompt_rag_audit = debug_meta.get("prompt_rag_selection_audit", {}) or {}
     if isinstance(prompt_rag_audit, dict):
@@ -1254,91 +1932,97 @@ def _method_process_html(debug_meta, final_prompt=""):
     else:
         sam_gate = "not needed for this task/category"
 
-    summary = (
-        _metric_html("MCTS", f"{_display_status(participation.get('mcts_participation_status', 'unknown'))} / {mcts_actions} actions", "signal")
-        + _metric_html("SAM3", f"{_display_status(participation.get('sam_participation_status', 'unknown'))} / {len(sam_scores)} masks", "builder")
-        + _metric_html("PVLA", f"{rag_summary.get('block_count', len(rag_blocks))} blocks", "pass")
-        + _metric_html("Phase-2", final_prompt_note, "")
-    )
-
-    stage_1 = (
-        '<article class="method-stage phase-global">'
-        '<div class="stage-head"><span>01</span><h4>Phase-1 Global Logic Report</h4></div>'
-        '<p>The first VLM pass reads the whole image and QA/options, then records a global structural report. '
-        'It is kept as context for Phase-2 instead of replacing local evidence.</p>'
+    global_panel = (
+        '<section class="stream-panel global-panel">'
+        '<div class="stream-heading"><div><p class="eyebrow">stream 1</p><h3>Global & logic stream</h3>'
+        '<p>Whole-image reasoning supplies the semantic frame; SAM3 and logic gates check whether the local evidence is structurally valid.</p></div></div>'
+        '<div class="chip-row">'
+        + _chip_html("Phase-1", "report captured" if _as_text(debug_meta.get("phase_1_result")).strip() else "no report", "global")
+        + _chip_html("policy", policy_text, "global")
+        + _chip_html("SAM3", _display_status(participation.get("sam_participation_status", "unknown")), "global")
+        + "</div>"
+        f'<blockquote>{_html(_short_text(phase_report, 420))}</blockquote>'
+        '<details><summary>Structural gate details</summary>'
         + _item_list_html([
-            f"Global report: <code>{_html(phase_report)}</code>",
-            f"Policy gates: <code>{_html(policy_text)}</code>",
-            f"Logic role: <code>{_html('global structural anchor' if not debug_meta.get('used_logic_engine') else 'logic engine active')}</code>",
-        ], "No Phase-1 trace was recorded.")
-        + "</article>"
-    )
-
-    stage_2 = (
-        '<article class="method-stage phase-local">'
-        '<div class="stage-head"><span>02</span><h4>Small Localizer + MCTS Crop Search</h4></div>'
-        '<p>The small localizer supplies anomaly heatmap proposals. MCTS searches those proposals and keeps only compact local evidence for the final prompt.</p>'
-        + _item_list_html([
-            f"Localizer: <code>{_html(debug_meta.get('threshold_source', 'unknown'))}</code>, score <code>{_html(heatmap_score)}</code>, threshold <code>{_html(threshold)}</code>",
-            f"Proposals: <code>{_html(debug_meta.get('region_proposal_count', 0))}</code>, selected crops <code>{_html(debug_meta.get('crop_count', 0))}</code>, prompt-visible <code>{_html(debug_meta.get('prompt_visible_crop_count', 0))}</code>",
-            f"MCTS budget: <code>{_html(mcts_budget_text)}</code>; action trace <code>{_html(mcts_actions)}</code>",
-            f"Top actions: <code>{_html(_top_count_text((mcts_search or {}).get('expanded_action_counts', {})))}</code>",
-            *crop_items,
-        ], "No local crop was selected for this question.")
-        + "</article>"
-    )
-
-    stage_3 = (
-        '<article class="method-stage phase-sam">'
-        '<div class="stage-head"><span>03</span><h4>SAM3 Structural Cut and Logic Gate</h4></div>'
-        '<p>SAM3 is used when structural segmentation can improve local evidence. Prompt candidates are audited, masks are quality checked, and accepted masks become crop evidence.</p>'
-        + _item_list_html([
-            f"SAM3 status: <code>{_html(_display_status(participation.get('sam_participation_status', 'unknown')))}</code>",
-            f"Structural gate: <code>{_html(sam_gate)}</code>",
-            f"Mask scores: <code>{_html(_compact_json(sam_scores[:6], 160))}</code>",
-            f"Artifact rule: <code>{_html(_short_text(debug_meta.get('sam3_crop_artifact_rule', 'not recorded'), 140))}</code>",
+            f"SAM3 gate: <code>{_html(sam_gate)}</code>",
+            f"Mask scores: <code>{_html(_compact_json(sam_scores[:6], 180))}</code>",
+            f"Artifact rule: <code>{_html(_short_text(debug_meta.get('sam3_crop_artifact_rule', 'not recorded'), 160))}</code>",
             *prompt_items,
         ], "No SAM3 prompt or mask audit was needed.")
-        + "</article>"
+        + "</details></section>"
     )
 
-    stage_4 = (
-        '<article class="method-stage phase-pvla">'
-        '<div class="stage-head"><span>04</span><h4>PVLA / RAG Multimodal Knowledge</h4></div>'
-        '<p>PVLA keeps the graph-shaped hierarchy visible: region-level text knowledge, graph cache provenance, and normal/reference visual cutouts are recalled before Phase-2.</p>'
+    mcts_status = _display_status(participation.get("mcts_participation_status", "unknown"))
+    action_viz = _mcts_action_viz_html(mcts_search, debug_meta.get("mcts_action_trace", []), mcts_status)
+    local_panel = (
+        '<section class="stream-panel action-panel">'
+        '<div class="stream-heading"><div><p class="eyebrow">stream 2</p><h3>Fine-grained & actions stream</h3>'
+        '<p>AdaptCLIP proposes suspicious regions, MCTS searches compact crops, and only selected local views are sent forward.</p></div></div>'
+        '<div class="chip-row">'
+        + _chip_html("heatmap peak", heatmap_peak_text, "action")
+        + _chip_html("MCTS", mcts_status, "action")
+        + _chip_html("proposals", debug_meta.get("region_proposal_count", 0), "action")
+        + _chip_html("crops", debug_meta.get("crop_count", 0), "action")
+        + "</div>"
+        + action_viz
+        + '<details open><summary>Search summary</summary>'
         + _item_list_html([
-            f"Retrieved blocks: <code>{_html(rag_summary.get('block_count', len(rag_blocks)))}</code>, graph sources <code>{_html(rag_summary.get('graph_cache_path_count', len(set(graph_sources))))}</code>, text sources <code>{_html(rag_summary.get('source_json_path_count', len(set(text_sources))))}</code>",
-            f"Visual references: <code>{_html(rag_summary.get('visual_reference_source_backed_count', 0))}</code> source-backed cutout(s)",
-            f"Selected regions: <code>{_html(', '.join(_first_items(selected_regions, 6)) or 'none')}</code>",
-            f"Graph caches: <code>{_html(', '.join(_first_items(graph_sources, 3)) or 'none')}</code>",
-            f"Text knowledge: <code>{_html(', '.join(_first_items(text_sources, 3)) or 'none')}</code>",
-        ], "No PVLA/RAG block was selected.")
-        + "</article>"
+            f"Localizer: <code>{_html(debug_meta.get('threshold_source', 'unknown'))}</code>",
+            f"Proposals: <code>{_html(debug_meta.get('region_proposal_count', 0))}</code>, selected crops <code>{_html(debug_meta.get('crop_count', 0))}</code>, prompt-visible <code>{_html(debug_meta.get('prompt_visible_crop_count', 0))}</code>",
+            f"MCTS budget: <code>{_html(mcts_budget_text)}</code>",
+            *crop_items,
+        ], "No local crop was selected for this question.")
+        + "</details></section>"
     )
 
-    stage_5 = (
-        '<article class="method-stage phase-final">'
-        '<div class="stage-head"><span>05</span><h4>Phase-2 Evidence Fusion</h4></div>'
-        '<p>The final VLM answer sees the original image plus the selected method evidence, then emits a constrained multiple-choice answer.</p>'
+    fusion_panel = (
+        '<section class="stream-panel fusion-panel">'
+        '<div class="stream-heading"><div><p class="eyebrow">fusion</p><h3>Cross-stream evidence handoff</h3>'
+        '<p>The final prompt is assembled from global facts, action crops, SAM3 gates, and graph-backed PVLA recall.</p></div></div>'
+        '<div class="chip-row">'
+        + _chip_html("prompt crops", len(prompt_crop_labels), "")
+        + _chip_html("PVLA blocks", len(debug_meta.get("prompt_rag_text_blocks", []) or []), "pvla")
+        + _chip_html("final prompt", final_prompt_note, "")
+        + "</div>"
         + _item_list_html([
             f"Prompt crops: <code>{_html(', '.join(prompt_crop_labels) or 'none')}</code>",
-            f"PVLA blocks in prompt: <code>{_html(len(debug_meta.get('prompt_rag_text_blocks', []) or []))}</code>",
-            f"Final prompt: <code>{_html(final_prompt_note)}</code>",
+            f"Selected regions: <code>{_html(', '.join(_first_items(selected_regions, 6)) or 'none')}</code>",
             f"Verification strategy: <code>{_html(debug_meta.get('verification_strategy', 'standard'))}</code>",
         ], "Phase-2 prompt has not been generated.")
-        + "</article>"
+        + "</section>"
+    )
+
+    verdict_panel = (
+        '<section class="stream-panel verdict-panel">'
+        '<div class="stream-heading"><div><p class="eyebrow">verdict</p><h3>Final verifier receives the curated bundle</h3>'
+        '<p>The answer card below contains the model choice, ground truth, and binary AD override when applicable.</p></div></div>'
+        '<div class="chip-row">'
+        + _chip_html("MCTS", f"{_display_status(participation.get('mcts_participation_status', 'unknown'))} / {mcts_actions} actions", "action")
+        + _chip_html("PVLA", f"{rag_summary.get('block_count', len(rag_blocks))} blocks", "pvla")
+        + _chip_html("SAM3", f"{len(sam_scores)} masks", "global")
+        + "</div></section>"
     )
 
     return (
-        '<div class="method-process-card">'
-        '<div class="process-head"><div><p class="eyebrow">Method playback</p>'
-        '<h3>GLLS evidence flow for this QA</h3>'
-        '<p>Each stage below is rendered from the run trace, so it shows what the method actually searched, cut, recalled, and sent to Phase-2.</p>'
+        '<div class="dual-board-html">'
+        '<div class="board-head"><div><p class="eyebrow">trace-backed demo</p>'
+        '<h2>Dual-stream verification for this QA</h2>'
+        '<p>Every panel is rendered from this run trace, pairing visuals with the text evidence that made them useful.</p>'
         '</div><span class="process-badge">Trace-backed</span></div>'
-        '<div class="method-kpi-grid">' + summary + "</div>"
-        '<div class="method-stage-grid">' + stage_1 + stage_2 + stage_3 + stage_4 + stage_5 + "</div>"
-        "</div>"
+        '<div class="board-grid">'
+        + _atlas_panel_html(category, rag_blocks)
+        + global_panel
+        + local_panel
+        + fusion_panel
+        + verdict_panel
+        + "</div></div>"
     )
+
+def _method_process_placeholder():
+    return render_dual_stream_placeholder()
+
+def _method_process_html(debug_meta, final_prompt="", category=""):
+    return render_dual_stream_trace(debug_meta, final_prompt, category)
 
 def _final_result_markdown(question, options, pred_key, gt_key, is_correct, final_response, debug_meta, ad_override):
     options = options or {}
@@ -1559,7 +2243,7 @@ async def run_analysis_stream(image, question, subclass, task_type, options, gro
             debug_meta,
             ad_override,
         )
-        method_process_md = _method_process_html(debug_meta, final_prompt)
+        method_process_md = _method_process_html(debug_meta, final_prompt, subclass)
         state["log"] += (
             "\nAnalysis complete."
             f"\nPrediction: {pred_key or 'N/A'} | GT: {gt_key or 'N/A'} | Result: "
@@ -1587,7 +2271,48 @@ async def run_analysis_stream(image, question, subclass, task_type, options, gro
         yield rag_file_paths, rag_text_content, state["heatmap"], None, None, f"Error: {str(e)}", "", "", None, None, None, "", f"<div class='method-process-card'><h3>Method run failed</h3><p>{_html(str(e))}</p></div>"
 
 # Wrapper for Gradio Generator
-def search_runner_wrapper(img, q, sub, task, opts, gt=None, man_txt=None, man_files=None):
+def _blocked_run_outputs(message):
+    return (
+        None,
+        "",
+        None,
+        None,
+        None,
+        message,
+        f"### Runtime configuration required\n\n{message}",
+        "",
+        None,
+        None,
+        None,
+        "",
+        _runtime_config_error_html(message),
+    )
+
+
+def search_runner_wrapper(
+    img,
+    q,
+    sub,
+    task,
+    opts,
+    gt=None,
+    dataset_name=None,
+    localizer_choice="Auto",
+    k_shot=1,
+    ckpt_path=None,
+    man_txt=None,
+    man_files=None,
+):
+    runtime_ok, _, runtime_message = global_sys.runtime_match_status(
+        dataset_name,
+        localizer_choice,
+        k_shot,
+        ckpt_path,
+    )
+    if not runtime_ok:
+        yield _blocked_run_outputs(runtime_message)
+        return
+
     # Verify opts before running
     opts = _coerce_options(opts)
     if not opts:
@@ -1734,6 +2459,534 @@ html, body, .gradio-container {
 .custom-card.tight {
     padding: 14px;
 }
+.quick-start {
+    position: sticky;
+    top: 72px;
+    z-index: 18;
+    align-items: stretch;
+    margin: 12px 0 16px;
+    padding: 12px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-lg);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: var(--shadow-md);
+    backdrop-filter: blur(14px);
+}
+.quick-start-copy {
+    height: 100%;
+    padding: 8px 10px;
+}
+.quick-start-copy h3 {
+    margin: 0 0 4px;
+    color: var(--ink);
+    font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
+    font-size: 1.16rem;
+}
+.quick-start-copy p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+.quick-action button {
+    min-height: 58px !important;
+}
+.sample-actions button {
+    min-height: 44px !important;
+    margin-top: 2px;
+}
+.demo-shell {
+    align-items: flex-start;
+}
+.dual-board-card {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    box-shadow: var(--shadow-sm);
+}
+.dual-board-html {
+    color: var(--ink);
+}
+.board-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    align-items: flex-start;
+    padding: 4px 2px 16px;
+}
+.board-head h2 {
+    margin: 2px 0 6px;
+    color: var(--ink);
+    font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
+    font-size: 1.55rem;
+    line-height: 1.08;
+}
+.board-head p {
+    margin: 0;
+    color: var(--muted);
+}
+.board-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+.stream-panel {
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-md);
+    background: var(--panel-raised);
+    padding: 14px;
+    min-height: 190px;
+}
+.stream-panel h3 {
+    margin: 0 0 6px;
+    color: var(--ink);
+    font-size: 1.05rem;
+}
+.stream-panel p {
+    margin: 0 0 8px;
+    color: var(--muted);
+}
+.stream-panel blockquote {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-left: 4px solid var(--signal);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: var(--signal-subtle);
+    color: var(--ink);
+}
+.stream-panel details {
+    margin-top: 10px;
+    border-top: 1px solid var(--rule);
+    padding-top: 9px;
+}
+.stream-panel summary {
+    cursor: pointer;
+    color: var(--ink);
+    font-weight: 800;
+}
+.atlas-panel,
+.fusion-panel,
+.verdict-panel {
+    grid-column: 1 / -1;
+}
+.global-panel {
+    border-top: 4px solid var(--signal);
+}
+.action-panel {
+    border-top: 4px solid var(--builder);
+}
+.atlas-panel {
+    border-top: 4px solid var(--pass);
+}
+.fusion-panel {
+    border-top: 4px solid #5A6675;
+}
+.verdict-panel {
+    border-top: 4px solid #8A5A22;
+}
+.chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0;
+}
+.evidence-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    max-width: 100%;
+    padding: 6px 9px;
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    background: #F8FAFD;
+    color: var(--ink);
+    font-size: 0.8rem;
+}
+.evidence-chip b {
+    color: var(--muted);
+    font-weight: 800;
+}
+.evidence-chip em {
+    overflow-wrap: anywhere;
+    font-style: normal;
+    font-weight: 800;
+}
+.evidence-chip.global {
+    background: var(--signal-subtle);
+    border-color: #CBD6F6;
+    color: var(--signal);
+}
+.evidence-chip.action {
+    background: var(--builder-subtle);
+    border-color: #E9D2B6;
+    color: var(--builder);
+}
+.evidence-chip.pvla {
+    background: var(--pass-subtle);
+    border-color: #C7E5D5;
+    color: var(--pass);
+}
+.paired-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: 12px;
+}
+.graph-mini {
+    position: relative;
+    min-height: 150px;
+    padding: 12px;
+    border: 1px solid #C7E5D5;
+    border-radius: var(--radius-md);
+    background:
+        linear-gradient(90deg, rgba(15, 122, 77, 0.12) 1px, transparent 1px) 0 0 / 34px 34px,
+        var(--pass-subtle);
+}
+.graph-mini strong {
+    display: inline-block;
+    margin-bottom: 8px;
+    color: var(--pass);
+    font-size: 1.02rem;
+}
+.graph-mini ul,
+.stream-panel ul {
+    margin: 8px 0 0;
+    padding-left: 18px;
+}
+.graph-mini li,
+.stream-panel li {
+    margin: 5px 0;
+    overflow-wrap: anywhere;
+}
+.atlas-graph-wrap {
+    position: relative;
+    max-width: 980px;
+    margin: 10px auto 0;
+    padding: 14px 14px 4px;
+    border: 1px solid #C7E5D5;
+    border-radius: var(--radius-md);
+    background:
+        radial-gradient(circle at 50% 50%, rgba(15, 122, 77, 0.10), transparent 40%),
+        linear-gradient(90deg, rgba(15, 122, 77, 0.06) 1px, transparent 1px) 0 0 / 40px 40px,
+        linear-gradient(0deg, rgba(15, 122, 77, 0.05) 1px, transparent 1px) 0 0 / 40px 40px,
+        var(--pass-subtle);
+    overflow: hidden;
+}
+.atlas-graph-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    overflow: visible;
+}
+.atlas-ring {
+    fill: none;
+    stroke: rgba(15, 122, 77, 0.20);
+    stroke-width: 1.4;
+    stroke-dasharray: 3 8;
+}
+.atlas-link {
+    fill: none;
+    stroke: #9FB7AC;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    opacity: 0.9;
+}
+.atlas-link.hier {
+    marker-end: url(#atlas-arrow);
+}
+.atlas-link.diff {
+    stroke: #C98A57;
+    stroke-width: 1.5;
+    stroke-dasharray: 5 5;
+    opacity: 0.82;
+}
+.atlas-graph-svg marker path {
+    fill: #8AA79A;
+}
+.atlas-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 0 2px 6px;
+    font-size: 0.74rem;
+    color: var(--muted);
+}
+.atlas-legend .atlas-leg {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+}
+.atlas-legend .atlas-leg i {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #8895A6;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+.atlas-legend .atlas-leg.root i { background: #D7466B; }
+.atlas-legend .atlas-leg.region i { background: #E0931F; }
+.atlas-legend .atlas-leg.defect i { background: #3452C7; }
+.atlas-legend .atlas-leg.diff i {
+    width: 16px;
+    height: 0;
+    border-radius: 0;
+    border-top: 2px dashed #C98A57;
+    background: none;
+    box-shadow: none;
+}
+.atlas-overflow {
+    margin: 4px 2px 2px;
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-align: center;
+}
+.atlas-node {
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 11px;
+    border: 1px solid rgba(78, 98, 118, 0.28);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.97);
+    color: var(--ink);
+    box-shadow: 0 4px 12px rgba(31, 43, 58, 0.12);
+    overflow: hidden;
+}
+.atlas-node .atlas-dot {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #8895A6;
+}
+.atlas-node .atlas-node-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.05;
+}
+.atlas-node .atlas-node-text em {
+    font-style: normal;
+    font-size: 0.55rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.atlas-node .atlas-node-text strong {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--ink);
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+}
+.atlas-node.root {
+    border-color: rgba(215, 70, 107, 0.55);
+    background: linear-gradient(180deg, #FFF1F4, #FFE3EA);
+    box-shadow: 0 6px 18px rgba(215, 70, 107, 0.22);
+}
+.atlas-node.root .atlas-dot { width: 12px; height: 12px; background: #D7466B; }
+.atlas-node.root .atlas-node-text em { color: #C76286; }
+.atlas-node.root .atlas-node-text strong {
+    font-size: 0.84rem;
+    color: #B12E52;
+    -webkit-line-clamp: 1;
+}
+.atlas-node.region {
+    border-color: rgba(224, 147, 31, 0.5);
+    background: #FFF7EA;
+}
+.atlas-node.region .atlas-dot { background: #E0931F; }
+.atlas-node.region .atlas-node-text strong { color: #9A6310; }
+.atlas-node.source {
+    border-color: rgba(15, 122, 77, 0.5);
+    background: #EFFAF3;
+}
+.atlas-node.source .atlas-dot { background: #0F7A4D; }
+.atlas-node.source .atlas-node-text strong { color: #0C6A43; }
+.atlas-node.defect {
+    border-color: rgba(52, 82, 199, 0.45);
+    background: #F1F4FF;
+}
+.atlas-node.defect .atlas-dot { background: #3452C7; }
+.atlas-node.defect .atlas-node-text strong { color: #2A43A8; }
+.atlas-crop-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 8px;
+}
+.atlas-crop {
+    margin: 0;
+}
+.atlas-crop-img {
+    aspect-ratio: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-sm);
+    background: #fff;
+    overflow: hidden;
+}
+.atlas-crop-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.atlas-crop-missing {
+    padding: 4px;
+    color: var(--muted);
+    font-size: 0.64rem;
+    text-align: center;
+}
+.atlas-crop figcaption {
+    margin-top: 4px;
+    color: var(--ink);
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1.15;
+    word-break: break-word;
+}
+.atlas-crop-note,
+.atlas-crop-empty {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 0.72rem;
+}
+.mcts-viz {
+    display: grid;
+    gap: 7px;
+    margin: 8px 0 2px;
+    padding: 10px 12px;
+    border: 1px solid #E9D2B6;
+    border-radius: var(--radius-md);
+    background: var(--builder-subtle);
+}
+.mcts-viz.empty {
+    color: var(--muted);
+    font-size: 0.82rem;
+    background: var(--panel-raised);
+    border-color: var(--rule);
+}
+.mcts-act {
+    display: grid;
+    grid-template-columns: 104px 1fr;
+    align-items: center;
+    gap: 10px;
+}
+.mcts-act-h {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: var(--builder);
+}
+.mcts-act-h i {
+    font-style: normal;
+    font-size: 0.9rem;
+}
+.mcts-act-h b {
+    margin-left: auto;
+    color: var(--ink);
+}
+.mcts-bar {
+    position: relative;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(176, 100, 15, 0.16);
+    overflow: hidden;
+}
+.mcts-bar span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    height: 100%;
+    min-width: 2px;
+    border-radius: 999px;
+    background: var(--builder);
+}
+.mcts-act.zoom .mcts-bar span { background: var(--signal); }
+.mcts-act.stop .mcts-bar span { background: var(--muted); }
+.mcts-viz-meta {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 0.72rem;
+}
+.atlas-details {
+    margin-top: 10px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.74);
+}
+.atlas-details summary {
+    padding: 10px 12px;
+    cursor: pointer;
+    color: var(--ink);
+    font-weight: 800;
+}
+.atlas-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+    padding: 0 12px 12px;
+}
+.atlas-detail-grid h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-transform: uppercase;
+}
+.atlas-detail-grid ul {
+    margin: 0;
+    padding-left: 18px;
+}
+.atlas-detail-grid li {
+    margin: 6px 0;
+}
+.atlas-detail-grid li span,
+.atlas-detail-grid li em {
+    color: var(--muted);
+    font-style: normal;
+}
+.atlas-detail-grid p {
+    margin: 0 0 8px;
+    padding: 8px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+}
+.evidence-note {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+.evidence-note p {
+    min-height: 74px;
+    margin: 0;
+    padding: 10px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    color: var(--ink);
+}
+.evidence-note b {
+    color: var(--muted);
+}
+.evidence-pair {
+    align-items: stretch;
+}
+.evidence-detail {
+    min-height: 100%;
+}
+.developer-trace textarea {
+    min-height: 220px !important;
+}
 .section-title {
     color: var(--ink);
     font-weight: 800;
@@ -1752,27 +3005,6 @@ html, body, .gradio-container {
     margin: 0 0 12px;
     font-size: 0.92rem;
 }
-.method-strip {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 8px;
-}
-.method-strip span {
-    min-height: 42px;
-    padding: 8px 10px;
-    border: 1px solid var(--rule);
-    border-radius: 999px;
-    background: var(--panel-raised);
-    color: var(--ink);
-    font-size: 0.86rem;
-    font-weight: 700;
-    text-align: center;
-}
-.method-strip span:nth-child(1) { background: var(--signal-subtle); color: var(--signal); }
-.method-strip span:nth-child(2) { background: var(--builder-subtle); color: var(--builder); }
-.method-strip span:nth-child(3) { background: var(--pass-subtle); color: var(--pass); }
-.method-strip span:nth-child(4) { background: #F2F4F7; }
-.method-strip span:nth-child(5) { background: #F7F1EA; color: var(--builder); }
 .desk-btn-primary {
     background: var(--signal) !important;
     color: white !important;
@@ -2003,12 +3235,21 @@ html, body, .gradio-container {
     .hero-panel {
         grid-template-columns: 1fr;
     }
-    .method-strip {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+    .quick-start,
+    .paired-grid,
+    .atlas-detail-grid,
+    .evidence-note,
+    .board-grid {
+        grid-template-columns: 1fr;
     }
     .method-kpi-grid,
     .method-stage-grid {
         grid-template-columns: 1fr;
+    }
+    .atlas-panel,
+    .fusion-panel,
+    .verdict-panel {
+        grid-column: auto;
     }
     .method-stage:nth-child(5),
     .method-stage.phase-final {
@@ -2055,22 +3296,61 @@ def create_ui():
             """
             <section class="hero-panel">
               <div>
-                <div class="eyebrow">Method playback</div>
-                <h1>GLLS Method Playback</h1>
+                <div class="eyebrow">Dual-stream anomaly reasoning demo</div>
+                <h1>GLLS Verification Board</h1>
                 <p class="hero-copy">
-                  Pick a QA sample and replay the two-stage reasoning path: Phase-1 global
-                  report, small-model heatmap proposals, MCTS crop search, SAM3 structural
-                  refinement, PVLA/RAG recall, and Phase-2 answer fusion.
+                  Choose a QA sample, initialize the runtime, and inspect how global logic,
+                  fine-grained action search, PVLA graph recall, and the final verifier work together.
                 </p>
               </div>
               <div class="hero-metrics">
-                <span><b>1</b><em>Initialize from local config</em></span>
-                <span><b>2</b><em>Load dataset/category QA rows</em></span>
-                <span><b>3</b><em>Run and export the evidence bundle</em></span>
+                <span><b>1</b><em>Initialize runtime</em></span>
+                <span><b>2</b><em>Load QA sample</em></span>
+                <span><b>3</b><em>Run dual-stream verifier</em></span>
               </div>
             </section>
             """
         )
+
+        with gr.Row(elem_classes="quick-start"):
+            with gr.Column(scale=3, elem_classes="quick-start-copy"):
+                gr.HTML(
+                    """
+                    <h3>Quick start</h3>
+                    <p>Choose the dataset/localizer/shot, initialize the matching weights, then run the verifier.</p>
+                    """
+                )
+            with gr.Column(scale=1, elem_classes="quick-action"):
+                btn_init = gr.Button("Initialize runtime", elem_classes="desk-btn-primary")
+            with gr.Column(scale=1, elem_classes="quick-action"):
+                btn_run_main = gr.Button("Run GLLS", variant="primary", elem_classes="desk-btn-primary")
+
+        with gr.Column(elem_classes="custom-card runtime-config-panel"):
+            gr.Markdown("### Runtime Configuration", elem_classes="section-title")
+            gr.Markdown(
+                "This controls the actual localizer weights loaded into memory. Changing any field requires re-initializing before a run.",
+                elem_classes="section-copy",
+            )
+            with gr.Row():
+                dd_dataset = gr.Dropdown(["mvtec", "visa"], label="Dataset", value="mvtec")
+                dd_localizer = gr.Dropdown(
+                    ["Auto", "ABounD", "AdaptCLIP"],
+                    label="Localizer",
+                    value="Auto",
+                )
+                dd_kshot = gr.Dropdown(
+                    ["1", "0"],
+                    value="1",
+                    label="Shot",
+                )
+            txt_runtime_weights = gr.Textbox(
+                label="Selected adapted weights",
+                value=_runtime_weight_summary(
+                    _runtime_weight_config("mvtec", "Auto", "1", DEFAULT_ADAPTCLIP_CHECKPOINT_PATH)
+                ),
+                lines=5,
+                interactive=False,
+            )
 
         with gr.Accordion("Runtime setup (read from local_paths.sh by default)", open=False):
             gr.Markdown(
@@ -2084,11 +3364,6 @@ def create_ui():
                     value="qwen3-vl",
                 )
                 dd_gpu = gr.Dropdown([str(i) for i in range(8)], value="0", label="GPU")
-                dd_kshot = gr.Dropdown(
-                    ["1", "0"],
-                    value="1",
-                    label="Localizer shots (1 = one-shot, 0 = zero-shot)",
-                )
                 cb_vllm = gr.Checkbox(label="Use vLLM if installed", value=False, interactive=True)
                 sl_gpu_util = gr.Slider(0.3, 0.95, value=0.85, step=0.05, label="vLLM memory fraction")
             with gr.Row():
@@ -2103,16 +3378,16 @@ def create_ui():
                     label="AdaptCLIP checkpoint (used when AdaptCLIP is selected)",
                 )
                 p_graph = gr.Textbox(DEFAULT_GRAPH_ROOT, label="PVLA graph cache root")
-            btn_init = gr.Button("Initialize GLLS runtime", elem_classes="desk-btn-primary")
 
-        with gr.Row():
+        with gr.Row(elem_classes="demo-shell"):
             with gr.Column(scale=1, min_width=390):
                 with gr.Column(elem_classes="custom-card"):
                     gr.Markdown("### QA Sample", elem_classes="section-title")
-                    gr.Markdown("Choose a dataset/category, load QA rows, then select one question.", elem_classes="section-copy")
-                    dd_dataset = gr.Dropdown(["mvtec", "visa"], label="Dataset", value="mvtec")
-                    dd_cat = gr.Dropdown(MVTEC_CLASSES, label="Category", value="bottle", interactive=True)
-                    btn_load = gr.Button("Load QA rows", size="sm", elem_classes="desk-btn-secondary")
+                    gr.Markdown("Choose a category and one question from the active dataset. Rows refresh automatically; use the local button if you need to reload.", elem_classes="section-copy")
+                    with gr.Row():
+                        dd_cat = gr.Dropdown(MVTEC_CLASSES, label="Category", value="bottle", interactive=True)
+                    with gr.Row(elem_classes="sample-actions"):
+                        btn_load = gr.Button("Load QA rows", elem_classes="desk-btn-secondary")
                     with gr.Row():
                         dd_sub_type = gr.Dropdown(label="Defect folder", choices=["All"], value="All")
                         dd_logic = gr.Dropdown(label="Task", choices=["All"], value="All")
@@ -2123,37 +3398,44 @@ def create_ui():
                     with gr.Accordion("Answer options", open=False):
                         txt_gt_out = gr.Textbox(label="Ground truth", interactive=False)
                         txt_opts_json = gr.Code(label="Options", language="json")
-                    btn_run_main = gr.Button("Run GLLS on this question", variant="primary", size="lg", elem_classes="desk-btn-primary")
-
-                with gr.Column(elem_classes="custom-card tight"):
-                    gr.Markdown("### Method Streams", elem_classes="section-title")
-                    gr.HTML(
-                        """
-                        <div class="method-strip">
-                          <span>Phase-1 global</span>
-                          <span>Small model + MCTS</span>
-                          <span>SAM3 logic cut</span>
-                          <span>PVLA/RAG recall</span>
-                          <span>Phase-2 answer</span>
-                        </div>
-                        """
-                    )
 
             with gr.Column(scale=2):
-                with gr.Column(elem_classes="custom-card"):
-                    gr.Markdown("### Method Process", elem_classes="section-title")
+                with gr.Column(elem_classes="dual-board-card"):
+                    gr.Markdown("### Dual-Stream Verification Board", elem_classes="section-title")
                     md_method_process = gr.HTML(_method_process_placeholder())
 
-                with gr.Row():
-                    with gr.Column(scale=1, elem_classes="custom-card"):
-                        gr.Markdown("### Global Heatmap", elem_classes="section-title")
-                        img_hm_out = gr.Image(label="Heatmap evidence", type="pil", height=280, elem_classes="evidence-image")
-                    with gr.Column(scale=1, elem_classes="custom-card"):
-                        gr.Markdown("### SAM3 / Local Evidence", elem_classes="section-title")
+                    with gr.Accordion("PVLA details / RAG recall", open=False):
+                        with gr.Row(elem_classes="evidence-pair"):
+                            with gr.Column(scale=1):
+                                gal_rag_source = gr.Gallery(
+                                    label="RAG visual references",
+                                    show_label=True,
+                                    columns=4,
+                                    rows=1,
+                                    height=190,
+                                    object_fit="contain",
+                                    type="filepath",
+                                )
+                            with gr.Column(scale=1, elem_classes="evidence-detail"):
+                                txt_rag_manual = gr.TextArea(label="Retrieved text knowledge", lines=7, interactive=False)
+
+                    with gr.Accordion("Run visuals — logic view, heatmap & crops", open=True):
+                        gr.Markdown("Stream 1 · Global & logic", elem_classes="section-title-sm")
+                        with gr.Row(equal_height=True, elem_classes="evidence-pair"):
+                            with gr.Column(scale=1):
+                                img_logic_debug = gr.Image(label="Logic view", type="pil", elem_classes="logic-view-img", show_label=True, interactive=False)
+                            with gr.Column(scale=1, elem_classes="evidence-detail"):
+                                md_p1_prompt = gr.Markdown(value="Waiting for a run.", elem_classes="prompt-card")
+                        gr.Markdown("Stream 2 · Fine-grained & actions", elem_classes="section-title-sm")
+                        with gr.Row(elem_classes="evidence-pair"):
+                            with gr.Column(scale=1):
+                                img_hm_out = gr.Image(label="Anomaly heatmap", type="pil", height=250, elem_classes="evidence-image")
+                            with gr.Column(scale=1):
+                                state_redbox_pil = gr.Image(label="Global red-box trace", type="pil", height=250, elem_classes="evidence-image", interactive=False)
                         gal_sam3_preview = gr.Gallery(
-                            label="Selected local views",
+                            label="Top-K crops and local views",
                             columns=4,
-                            height=280,
+                            height=230,
                             object_fit="contain",
                             preview=True,
                         )
@@ -2164,80 +3446,68 @@ def create_ui():
                             visible=False,
                         )
 
-                with gr.Column(elem_classes="custom-card"):
-                    gr.Markdown("### Source-backed PVLA Knowledge", elem_classes="section-title")
-                    with gr.Tabs():
-                        with gr.TabItem("Visual references"):
-                            gal_rag_source = gr.Gallery(
-                                label="Retrieved normal/reference cutouts",
-                                show_label=True,
-                                columns=4,
-                                rows=1,
-                                height=180,
-                                object_fit="contain",
-                                type="filepath",
-                            )
-                        with gr.TabItem("Text knowledge"):
-                            txt_rag_manual = gr.TextArea(label="Retrieved knowledge blocks", lines=7, interactive=False)
+                    with gr.Accordion("Final Verdict", open=True):
+                        md_final_res = gr.Markdown("### Waiting for a run")
 
-                with gr.Column(elem_classes="custom-card"):
-                    gr.Markdown("### Answer and Evidence Trace", elem_classes="section-title")
-                    with gr.Tabs():
-                        with gr.TabItem("Question result"):
-                            md_final_res = gr.Markdown("### Waiting for a run")
-
-                        with gr.TabItem("Prompt evidence"):
-                            with gr.Row(equal_height=True):
-                                with gr.Column(scale=1):
-                                    gr.Markdown("### Visual input", elem_classes="section-title-sm")
-                                    img_logic_debug = gr.Image(label="Logic view", type="pil", elem_classes="logic-view-img", show_label=False, interactive=False)
-                                with gr.Column(scale=1):
-                                    gr.Markdown("### Phase-1 prompt", elem_classes="section-title-sm")
-                                    md_p1_prompt = gr.Markdown(value="Waiting for a run.", elem_classes="prompt-card")
-                            txt_cot_edit = gr.TextArea(label="Final prompt", lines=8, interactive=False)
-
-                        with gr.TabItem("Run logs"):
-                            txt_logs_stream = gr.TextArea(elem_classes="log-box", lines=12, show_copy_button=True)
-
-                with gr.Column(elem_classes="custom-card"):
-                    gr.Markdown("### Export", elem_classes="section-title")
-                    cb_export_docx = gr.Checkbox(
-                        label="Include Word report (.docx) inside ZIP",
-                        value=True,
-                        interactive=True,
-                    )
-                    if hasattr(gr, "DownloadButton"):
-                        try:
-                            btn_export_zip = gr.DownloadButton(
-                                "Download full run bundle",
-                                variant="primary",
-                                size="lg",
-                                elem_classes="desk-btn-primary",
-                            )
-                        except TypeError:
-                            btn_export_zip = gr.DownloadButton("Download full run bundle")
-                        file_export_zip = None
-                    else:
-                        btn_export_zip = gr.Button(
-                            "Generate export bundle",
-                            variant="primary",
-                            size="lg",
-                            elem_classes="desk-btn-primary",
-                        )
-                        file_export_zip = gr.File(label="Export ZIP", interactive=False, type="filepath")
-                    txt_export_status = gr.Textbox(label="Export status", interactive=False)
+                    with gr.Accordion("Developer trace / Export", open=False):
+                        with gr.Tabs():
+                            with gr.TabItem("Prompts"):
+                                txt_cot_edit = gr.TextArea(label="Final prompt", lines=8, interactive=False)
+                            with gr.TabItem("Run logs"):
+                                txt_logs_stream = gr.TextArea(elem_classes="log-box", lines=12, show_copy_button=True)
+                            with gr.TabItem("Export"):
+                                cb_export_docx = gr.Checkbox(
+                                    label="Include Word report (.docx) inside ZIP",
+                                    value=True,
+                                    interactive=True,
+                                )
+                                if hasattr(gr, "DownloadButton"):
+                                    try:
+                                        btn_export_zip = gr.DownloadButton(
+                                            "Download full run bundle",
+                                            variant="primary",
+                                            size="lg",
+                                            elem_classes="desk-btn-primary",
+                                        )
+                                    except TypeError:
+                                        btn_export_zip = gr.DownloadButton("Download full run bundle")
+                                    file_export_zip = None
+                                else:
+                                    btn_export_zip = gr.Button(
+                                        "Generate export bundle",
+                                        variant="primary",
+                                        size="lg",
+                                        elem_classes="desk-btn-primary",
+                                    )
+                                    file_export_zip = gr.File(label="Export ZIP", interactive=False, type="filepath")
+                                txt_export_status = gr.Textbox(label="Export status", interactive=False)
 
         # --- States ---
         txt_hidden_t_type = gr.Textbox(visible=False)
-        state_redbox_pil = gr.State()
         state_crops_paths = gr.State()
 
         # --- Event Bindings ---
         
         # 1. Initialize
         btn_init.click(
-            lambda pm, pl, pg, ps, pd, pq, gpu, mt, vlm, gu, dn, ks: global_sys.initialize(pm, pl, pg, ps, pd, pq, gpu, mt, vlm, gu, dn, ks),
-            inputs=[p_model, p_ckpt, p_graph, p_sam, p_data, p_qa, dd_gpu, dd_model_type, cb_vllm, sl_gpu_util, dd_dataset, dd_kshot],
+            lambda pm, pl, pg, ps, pd, pq, gpu, mt, vlm, gu, dn, ks, lc: global_sys.initialize(
+                pm, pl, pg, ps, pd, pq, gpu, mt, vlm, gu, dn, ks, lc
+            ),
+            inputs=[
+                p_model,
+                p_ckpt,
+                p_graph,
+                p_sam,
+                p_data,
+                p_qa,
+                dd_gpu,
+                dd_model_type,
+                cb_vllm,
+                sl_gpu_util,
+                dd_dataset,
+                dd_kshot,
+                dd_localizer,
+            ],
             outputs=status_box,
             api_name=False,
         )
@@ -2245,18 +3515,25 @@ def create_ui():
         # 2. Update Category List when Dataset Changes
         def update_cat_list(ds_name):
             if ds_name == "mvtec":
-                return (
-                    gr.update(choices=MVTEC_CLASSES, value=MVTEC_CLASSES[0]),
-                    gr.update(value=_default_adaptclip_checkpoint("mvtec")),
-                )
-            else:
-                return (
-                    gr.update(choices=VISA_CLASSES, value=VISA_CLASSES[0]),
-                    gr.update(value=_default_adaptclip_checkpoint("visa")),
-                )
-        
-        dd_dataset.change(update_cat_list, dd_dataset, [dd_cat, p_ckpt], api_name=False)
+                ckpt = _default_adaptclip_checkpoint("mvtec")
+                return gr.update(choices=MVTEC_CLASSES, value=MVTEC_CLASSES[0]), gr.update(value=ckpt), ckpt
+            ckpt = _default_adaptclip_checkpoint("visa")
+            return gr.update(choices=VISA_CLASSES, value=VISA_CLASSES[0]), gr.update(value=ckpt), ckpt
 
+        def runtime_preview(ds_name, localizer_choice, k_shot, ckpt_path):
+            try:
+                cfg = _runtime_weight_config(ds_name, localizer_choice, k_shot, ckpt_path)
+            except Exception as e:
+                return f"Invalid runtime configuration: {e}", f"Runtime config invalid: {e}"
+            ok, _, _ = global_sys.runtime_match_status(ds_name, localizer_choice, k_shot, ckpt_path)
+            if ok:
+                status_msg = "Runtime ready for selected weights."
+            elif global_sys.is_initialized:
+                status_msg = "Runtime stale: initialize to load the selected weights."
+            else:
+                status_msg = "Runtime not initialized for selected weights."
+            return _runtime_weight_summary(cfg), status_msg
+        
         def empty_case_payload():
             return None, "", "", "", "{}"
 
@@ -2268,16 +3545,18 @@ def create_ui():
             return img, q, t, gt, json.dumps(opts, indent=2, ensure_ascii=False)
 
         # 3. Load Dataset & Reset Subclass/Logic Dropdowns
-        def on_cat_load(c):
+        def on_cat_load(ds_name, c, localizer_choice="Auto", k_shot=1, ckpt_path=DEFAULT_ADAPTCLIP_CHECKPOINT_PATH):
             if not global_sys.data_manager:
-                return (
-                    gr.update(choices=["All"], value="All"),
-                    gr.update(choices=["All"], value="All"),
-                    gr.update(choices=[], value=None),
-                    *empty_case_payload(),
-                    "Initialize the engine before loading a category.",
+                global_sys.data_manager = DatasetManager(DEFAULT_MMAD_ROOT, DEFAULT_QA_ROOT, ds_name or "mvtec")
+            if ds_name and global_sys.data_manager.dataset_name != ds_name:
+                global_sys.data_manager = DatasetManager(
+                    global_sys.data_manager.root_path,
+                    global_sys.data_manager.qa_root_path,
+                    ds_name,
                 )
             msg = global_sys.data_manager.load_subclass(c)
+            weight_summary, runtime_msg = runtime_preview(ds_name, localizer_choice, k_shot, ckpt_path)
+            msg = f"{msg} | {runtime_msg}"
             # FORCE RESET of dropdowns to prevent cross-dataset sticky values
             subs = ["All"] + global_sys.data_manager.subfolder_choices
             logics = ["All"] + global_sys.data_manager.task_type_choices
@@ -2288,15 +3567,62 @@ def create_ui():
                 gr.update(choices=logics, value="All"),
                 gr.update(choices=sample_choices, value=selected_sample),
                 *sample_payload_from_choice(selected_sample),
+                weight_summary,
                 msg,
+                render_dual_stream_placeholder(c),
             )
 
-        btn_load.click(
-            on_cat_load,
-            dd_cat,
-            [dd_sub_type, dd_logic, dd_samples_list, img_preview_in, txt_q_in, txt_hidden_t_type, txt_gt_out, txt_opts_json, status_box],
+        qa_load_outputs = [
+            dd_sub_type,
+            dd_logic,
+            dd_samples_list,
+            img_preview_in,
+            txt_q_in,
+            txt_hidden_t_type,
+            txt_gt_out,
+            txt_opts_json,
+            txt_runtime_weights,
+            status_box,
+            md_method_process,
+        ]
+
+        def on_dataset_change(ds_name, localizer_choice, k_shot):
+            cat_update, ckpt_update, next_ckpt = update_cat_list(ds_name)
+            next_category = MVTEC_CLASSES[0] if ds_name == "mvtec" else VISA_CLASSES[0]
+            return cat_update, ckpt_update, *on_cat_load(ds_name, next_category, localizer_choice, k_shot, next_ckpt)
+
+        dd_dataset.change(
+            on_dataset_change,
+            [dd_dataset, dd_localizer, dd_kshot],
+            [dd_cat, p_ckpt, *qa_load_outputs],
             api_name=False,
         )
+        dd_cat.change(
+            on_cat_load,
+            [dd_dataset, dd_cat, dd_localizer, dd_kshot, p_ckpt],
+            qa_load_outputs,
+            api_name=False,
+        )
+        btn_load.click(
+            on_cat_load,
+            [dd_dataset, dd_cat, dd_localizer, dd_kshot, p_ckpt],
+            qa_load_outputs,
+            api_name=False,
+        )
+        demo.load(
+            on_cat_load,
+            [dd_dataset, dd_cat, dd_localizer, dd_kshot, p_ckpt],
+            qa_load_outputs,
+            api_name=False,
+        )
+
+        for runtime_trigger in [dd_localizer, dd_kshot, p_ckpt]:
+            runtime_trigger.change(
+                runtime_preview,
+                [dd_dataset, dd_localizer, dd_kshot, p_ckpt],
+                [txt_runtime_weights, status_box],
+                api_name=False,
+            )
 
         # 4. Filter Samples
         def on_filter_update(s_f, l_f, search_t):
@@ -2324,7 +3650,18 @@ def create_ui():
         # 6. Run Actions
         btn_run_main.click(
             search_runner_wrapper,
-            inputs=[img_preview_in, txt_q_in, dd_cat, txt_hidden_t_type, txt_opts_json, txt_gt_out],
+            inputs=[
+                img_preview_in,
+                txt_q_in,
+                dd_cat,
+                txt_hidden_t_type,
+                txt_opts_json,
+                txt_gt_out,
+                dd_dataset,
+                dd_localizer,
+                dd_kshot,
+                p_ckpt,
+            ],
             outputs=[gal_rag_source, txt_rag_manual, img_hm_out, gal_sam3_preview, file_sam3_editor, txt_logs_stream, md_final_res, txt_cot_edit, state_redbox_pil, state_crops_paths, img_logic_debug, md_p1_prompt, md_method_process],
             api_name=False,
         )
