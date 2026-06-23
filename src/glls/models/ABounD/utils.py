@@ -414,8 +414,7 @@ def get_anomaly_synthesis_params(dataset_name, class_name=None):
         if class_name in TEXTURES:
             params['resize_bounds'] = (0.5, 2)
 
-    # --- 这里保留了您代码中为其他数据集准备的逻辑 ---
-    else:  # 其余数据集保持原默认
+    else:
         params = {
             'width_bounds_pct': ((0.05, 0.15), (0.05, 0.15)),
             'num_patches'     : 10,

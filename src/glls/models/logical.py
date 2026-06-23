@@ -8,7 +8,6 @@ from glls.seg.sam3_profiles import get_object_prompt
 
 class VisualLogicProcessor:
     def __init__(self):
-        # --- MVTec Cable 颜色规则配置 ---
         self.STANDARD_RULES = {
             "Center Top":   "YELLOW", 
             "Center Left":  "BLUE",
@@ -97,7 +96,7 @@ class VisualLogicProcessor:
             return np.ones((h, w), dtype=np.uint8)
     def get_logic_analysis(self, category, image_pil, sam_engine):
         """
-        统一的逻辑分析入口，支持 MVTec 和 VisA 数据集
+        Shared logic entrypoint for MVTec and VisA categories.
         """
         cat_str = str(category).lower()
         
@@ -337,10 +336,7 @@ class VisualLogicProcessor:
         return full_report, Image.fromarray(debug_vis), final_verdict
     def _analyze_candle_wick(self, image_pil, sam_engine):
         """
-        针对 VisA Candle 的细粒度逻辑分析：
-        1. Short Wick (短芯)
-        2. Missing Wick (缺芯)
-        3. Irregular/Long Wick (异形/长芯) - 可选
+        Fine-grained geometric logic for VisA candle wick defects.
         """
         img_np = np.array(image_pil)
         h_img, w_img = img_np.shape[:2]
@@ -356,7 +352,7 @@ class VisualLogicProcessor:
             "wick": "the small white wick threads in the center of the tea light candles" 
         }
 
-        # Step A: 获取所有蜡烛主体 (Reference Scale)
+        # Segment all candle bodies as the reference scale.
         res_candles = sam_engine.predict_mask(prompts["whole_object"])
         mask_candles = res_candles[0] if isinstance(res_candles, (tuple, list)) else res_candles
         if mask_candles is None:
@@ -364,11 +360,11 @@ class VisualLogicProcessor:
         if mask_candles.ndim == 3: mask_candles = mask_candles.squeeze()
         mask_candles = mask_candles.astype(np.uint8) * 255
 
-        # Step B: 获取所有灯芯 (Targets)
+        # Segment all wick candidates.
         res_wicks = sam_engine.predict_mask(prompts["wick"])
         mask_wicks = res_wicks[0] if isinstance(res_wicks, (tuple, list)) else res_wicks
         if mask_wicks is None:
-            mask_wicks = np.zeros_like(mask_candles) # 可能是全部缺失
+            mask_wicks = np.zeros_like(mask_candles)
         elif mask_wicks.ndim == 3:
             mask_wicks = mask_wicks.squeeze()
         mask_wicks = mask_wicks.astype(np.uint8) * 255
@@ -376,22 +372,22 @@ class VisualLogicProcessor:
         # ---------------------------------------------------------
         # 2. Instance Analysis (Loop through each candle)
         # ---------------------------------------------------------
-        # 找出独立的蜡烛个体
+        # Find individual candle instances.
         contours_candles, _ = cv2.findContours(mask_candles, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # 按位置排序：从上到下，从左到右
+        # Sort instances from top to bottom, then left to right.
         candle_instances = []
         for cnt in contours_candles:
-            if cv2.contourArea(cnt) < 1000: continue # 过滤噪点
+            if cv2.contourArea(cnt) < 1000: continue
             x, y, w, h = cv2.boundingRect(cnt)
             candle_instances.append({
                 "cnt": cnt,
                 "bbox": (x, y, w, h),
                 "center": (x + w//2, y + h//2),
-                "diameter": max(w, h) # 蜡烛直径估计
+                "diameter": max(w, h)
             })
 
-        # 简单的排序逻辑：先按 Y 排序（分行），再按 X 排序
+        # Row-major order for stable position names.
         candle_instances.sort(key=lambda k: (k['center'][1] // (h_img//2), k['center'][0]))
 
         report_lines.append(f"Detected {len(candle_instances)} candles.")
@@ -400,23 +396,18 @@ class VisualLogicProcessor:
             x, y, w, h = candle['bbox']
             diameter = candle['diameter']
             
-            # 定义位置名称
             row_name = "Top" if candle['center'][1] < h_img / 2 else "Bottom"
             col_name = "Left" if candle['center'][0] < w_img / 2 else "Right"
             pos_name = f"{row_name}-{col_name} Candle"
 
-            # 绘制蜡烛轮廓
             cv2.rectangle(debug_vis, (x, y), (x+w, y+h), (200, 200, 200), 1)
             
-            # --- ROI Check: 在当前蜡烛范围内找 Wick ---
-            # 创建当前蜡烛的 Mask
+            # Search for wick pixels inside this candle instance only.
             single_candle_mask = np.zeros((h_img, w_img), dtype=np.uint8)
             cv2.drawContours(single_candle_mask, [candle['cnt']], -1, 255, -1)
             
-            # 取交集：Wicks AND Single_Candle
             current_wick_mask = cv2.bitwise_and(mask_wicks, mask_wicks, mask=single_candle_mask)
             
-            # 分析该蜡烛内的灯芯
             cnts_wick, _ = cv2.findContours(current_wick_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
             status = "Normal"
@@ -424,29 +415,23 @@ class VisualLogicProcessor:
             metric_info = ""
 
             if not cnts_wick:
-                # Case 1: 没找到灯芯 -> Missing Wick
                 status = "MISSING_WICK"
                 color = (0, 0, 255) # Red
                 defects_found.append(f"{pos_name} (Missing Wick)")
             else:
-                # 找到最大的一块作为主灯芯
                 main_wick_cnt = max(cnts_wick, key=cv2.contourArea)
                 
-                # 计算灯芯的几何特征
                 rect = cv2.minAreaRect(main_wick_cnt) # (center), (width, height), angle
                 box = cv2.boxPoints(rect)
                 box = np.int0(box)
                 
-                # 灯芯长度 (取矩形的长边)
                 wick_len = max(rect[1])
                 
-                # 计算比率：灯芯长度 / 蜡烛直径
-                # 正常灯芯通常占据直径的 20% - 30% 左右
+                # Compare wick length against candle diameter.
                 ratio = wick_len / diameter
                 
                 metric_info = f"Ratio: {ratio:.2f}"
 
-                # === 核心判定逻辑 ===
                 SHORT_WICK_THRESH = 0.22
                 
                 if ratio < SHORT_WICK_THRESH:
@@ -458,13 +443,10 @@ class VisualLogicProcessor:
                     color = (0, 0, 255) # Red
                     defects_found.append(f"{pos_name} (Long Wick or missing Wick detected, Ratio={ratio:.2f})")
                 else:
-                    # 如果不是短芯，检查是否是不规则
                     pass
 
-                # 绘制灯芯
                 cv2.drawContours(debug_vis, [box], 0, color, 2)
 
-            # 在图上标注文字
             cv2.putText(debug_vis, f"{i+1}", (x+5, y+20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             cv2.putText(debug_vis, status, (x, y + h + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
             if metric_info:
@@ -485,7 +467,7 @@ class VisualLogicProcessor:
         else:
             final_verdict = "Global Status: Normal. All wicks are present and of standard length."
 
-        # === [MEMORY FIX] 清理中间变量 ===
+        # Release large intermediate arrays before returning.
         del img_np, mask_candles, mask_wicks
         if 'res_candles' in locals():
             del res_candles
@@ -645,12 +627,12 @@ class VisualLogicProcessor:
         missing_parts = [] 
         swap_details = []
 
-        # Step A: 统计缺失的部分
+        # Collect missing cable positions.
         for pos, detected_color in detected_results.items():
             if detected_color == "VOID":
                 missing_parts.append(pos)
 
-        # Step B: 生成缺失描述
+        # Produce the final missing-part description.
         if len(missing_parts) >= 2:
             missing_locs_str = ", ".join(missing_parts)
             final_verdict = f"Global Status: Missing cables or coppers detected at {missing_locs_str}."
@@ -673,7 +655,7 @@ class VisualLogicProcessor:
             else:
                 final_verdict = "Global Status: No logical defects(no missing cable or cable swap)."
 
-        # === [MEMORY FIX] 清理中间变量 ===
+        # Release large intermediate arrays before returning.
         del img_np, mask_sheath, mask_copper_dilated, mask_sheath_dilated
         del mask_whole, mask_safe_insulation, mask_backup_insulation
         if 'res_sheath' in locals():
@@ -690,14 +672,12 @@ class VisualLogicProcessor:
     # =========================================================
     def _analyze_zipper_simple(self, image_pil, sam_engine):
         """
-        针对 Zipper 的几何逻辑检测
-        1. Squeezed Teeth: 宽度小于平均值 (Narrowing/Constriction)
-        2. Split Teeth: 宽度大于平均值 (Widening/Separation)
+        Geometric logic for zipper squeezed-teeth and split-teeth defects.
         """
         img_np = np.array(image_pil)
         h, w = img_np.shape[:2]
         
-        # 1. SAM Segmentation: 获取拉链齿区域
+        # Segment the central zipper teeth.
         prompt = "the central interlocking zipper teeth"
         res_teeth = sam_engine.predict_mask(prompt)
         
@@ -708,12 +688,11 @@ class VisualLogicProcessor:
         if mask_teeth.ndim == 3: mask_teeth = mask_teeth.squeeze()
         mask_teeth = mask_teeth.astype(np.uint8) * 255
 
-        # 2. 预处理：形态学闭运算
-        # 使用垂直方向的长方形核，连接齿缝；对于 Split 情况，这会将分开的左右两边连成一个较宽的块
+        # Close vertical gaps so split teeth become a wider connected region.
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 15))
         mask_solid = cv2.morphologyEx(mask_teeth, cv2.MORPH_CLOSE, kernel)
         
-        # 3. 提取最大轮廓
+        # Extract the dominant zipper contour.
         contours, _ = cv2.findContours(mask_solid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return "Error: No zipper contour found.", None, None
@@ -721,11 +700,10 @@ class VisualLogicProcessor:
         main_cnt = max(contours, key=cv2.contourArea)
         x, y, w_box, h_box = cv2.boundingRect(main_cnt)
         
-        # 创建 Debug 视图
         debug_vis = img_np.copy()
-        cv2.drawContours(debug_vis, [main_cnt], -1, (0, 255, 0), 1) # 绿色轮廓
+        cv2.drawContours(debug_vis, [main_cnt], -1, (0, 255, 0), 1)
         
-        # 4. 几何分析：宽度轮廓
+        # Analyze the row-wise width profile.
         roi_mask = mask_solid[y:y+h_box, x:x+w_box]
         row_widths = np.sum(roi_mask > 0, axis=1)
         
@@ -737,7 +715,6 @@ class VisualLogicProcessor:
         end_idx = int(len(valid_indices) * 0.9)
         trimmed_widths = row_widths[valid_indices[start_idx:end_idx]]
         
-        # 统计特征
         median_width = np.median(trimmed_widths)
         min_width = np.min(trimmed_widths)
         max_width = np.max(trimmed_widths)
@@ -747,11 +724,9 @@ class VisualLogicProcessor:
             f"Range: [{min_width:.1f}, {max_width:.1f}] px",
         ]
 
-        # 5. 双向判定逻辑
-        # 阈值设定 (可微调)
-        # Squeezed: 宽度 < 中位数 88%
+        # Squeezed: width < 88% of the median.
         squeeze_threshold = median_width * 0.88
-        # Split: 宽度 > 中位数 120% (开裂通常伴随显著变宽)
+        # Split: width > 120% of the median.
         split_threshold = median_width * 1.20
         
         is_squeezed = False
@@ -761,24 +736,21 @@ class VisualLogicProcessor:
         split_y_coords = []
 
         for i in range(len(row_widths)):
-            # 忽略顶底边缘
+            # Ignore top and bottom edges.
             if i < h_box * 0.05 or i > h_box * 0.95: continue
             
             width = row_widths[i]
             if width <= 0: continue
             
-            # Check Squeezed (变窄)
             if width < squeeze_threshold:
                 is_squeezed = True
                 squeeze_y_coords.append(y + i)
             
-            # Check Split (变宽)
             elif width > split_threshold:
                 is_split = True
                 split_y_coords.append(y + i)
         
-        # 6. 绘制异常区域
-        # Squeezed -> 红色 (Red)
+        # Draw anomaly regions.
         if squeeze_y_coords:
             min_y = min(squeeze_y_coords)
             max_y = max(squeeze_y_coords)
@@ -786,7 +758,6 @@ class VisualLogicProcessor:
             cv2.putText(debug_vis, "SQUEEZED", (x - 110, (min_y+max_y)//2), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
 
-        # Split -> 橙色 (Orange: BGR=0,165,255)
         if split_y_coords:
             min_y = min(split_y_coords)
             max_y = max(split_y_coords)
@@ -794,7 +765,6 @@ class VisualLogicProcessor:
             cv2.putText(debug_vis, "SPLIT/WIDE", (x + w_box + 10, (min_y+max_y)//2), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
-        # 7. 生成结论
         final_verdict = None
         if is_split:
             final_verdict = "Global Status: Split Teeth detected. Significant widening observed in zipper structure."
@@ -806,7 +776,7 @@ class VisualLogicProcessor:
             final_verdict = "Global Status: Normal. Zipper teeth width is consistent."
             report_lines.append("- Result: PASS")
 
-        # === [MEMORY FIX] 清理中间变量 ===
+        # Release large intermediate arrays before returning.
         del img_np, mask_teeth, mask_solid, roi_mask, row_widths
         if 'res_teeth' in locals():
             del res_teeth

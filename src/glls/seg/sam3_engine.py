@@ -4,21 +4,20 @@ from PIL import Image
 import os
 import torch.nn.functional as F
 
-# 引入 SAM3 模块
-# 保留原始导入
+# Keep the upstream SAM3 imports explicit.
 from sam3.model_builder import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
 
 class Sam3Engine:
     def __init__(self, checkpoint_path, device=None):
         """
-        初始化 SAM3 模型
+        Initialize the SAM3 model.
         """
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
 
         print(f"[Engine] Loading SAM3 model from: {checkpoint_path} to {self.device}")
         
-        # [Fix] 尝试设置默认设备，防止部分内部操作走默认 cuda:0
+        # Keep internal CUDA operations on the requested device.
         if "cuda" in str(self.device) and ":" in str(self.device):
             try:
                 device_idx = int(str(self.device).split(":")[-1])
@@ -32,7 +31,7 @@ class Sam3Engine:
             device=self.device
         )
         
-        # 确保模型在正确的设备上并处于评估模式
+        # Ensure the model is on the selected device and in eval mode.
         self.model.to(self.device)
         self._align_fused_mlp_dtypes()
         self.model.eval()
@@ -61,14 +60,14 @@ class Sam3Engine:
 
     def set_image(self, image_path_or_pil):
         """
-        设置当前处理的图片
+        Set the image used by subsequent prompt calls.
         """
         if isinstance(image_path_or_pil, str):
             self.current_image_pil = Image.open(image_path_or_pil).convert("RGB")
         else:
             self.current_image_pil = image_path_or_pil
             
-        # [Fix] 再次确保设备上下文
+        # Re-assert the CUDA context before SAM3 image preprocessing.
         if "cuda" in str(self.device) and ":" in str(self.device):
             try:
                 device_idx = int(str(self.device).split(":")[-1])
@@ -89,7 +88,7 @@ class Sam3Engine:
     @torch.inference_mode()
     def predict_mask(self, prompt_text, threshold=0.4):
         """
-        文本提示预测
+        Predict a mask from a text prompt.
         """
         if self.inference_state is None:
             raise RuntimeError("Please call set_image() before predicting.")
@@ -101,7 +100,7 @@ class Sam3Engine:
     @torch.inference_mode()
     def predict_mask_with_boxes(self, boxes_norm, threshold=0.4):
         """
-        [New] 使用归一化边界框列表进行预测
+        Predict masks from normalized bounding boxes.
         Args:
             boxes_norm: List of [cx, cy, w, h] (normalized 0-1)
         """
@@ -114,8 +113,7 @@ class Sam3Engine:
         combined_mask_tensor = None
         max_score = 0.0
 
-        # SAM3 支持一次性传入多个 Prompt，也可以循环调用
-        # 为了稳健，我们这里对每个框分别调用并取并集
+        # Call SAM3 once per box and merge masks for version-tolerant behavior.
         for box in boxes_norm:
             try:
                 self._reset_prompts()
@@ -125,11 +123,10 @@ class Sam3Engine:
                     self.inference_state
                 )
                 
-                # 处理输出
                 mask_np, score = self._process_output(output, threshold)
                 
                 if mask_np is not None:
-                    # 转换为 Tensor 以便在 GPU 上做逻辑运算 (避免频繁 CPU/GPU 切换)
+                    # Keep mask union on-device to avoid repeated CPU/GPU transfers.
                     mask_t = torch.from_numpy(mask_np).to(self.device)
                     
                     if combined_mask_tensor is None:
@@ -151,14 +148,14 @@ class Sam3Engine:
     @torch.inference_mode()
     def predict_mask_with_points(self, points, labels, threshold=0.4):
         """
-        点提示预测
+        Predict a mask from point prompts.
         """
         if self.inference_state is None:
             raise RuntimeError("Please call set_image() before predicting.")
 
         self._reset_prompts()
 
-        # 尝试使用 add_geometric_prompt (处理为微小框)
+        # Prefer add_geometric_prompt by converting the point to a small box.
         if hasattr(self.processor, "add_geometric_prompt"):
             W, H = self.current_image_pil.size
             pt = points[0] 
@@ -173,7 +170,7 @@ class Sam3Engine:
             )
             return self._process_output(output, threshold)
 
-        # 兼容 set_point_prompt
+        # Fall back to point-prompt APIs used by older processor versions.
         points_tensor = torch.tensor([points], dtype=torch.float32, device=self.device)
         labels_tensor = torch.tensor([labels], dtype=torch.int64, device=self.device)
         
@@ -202,9 +199,9 @@ class Sam3Engine:
 
     def _process_output(self, output, threshold):
         """
-        统一处理输出结果
+        Normalize SAM3 output variants into a single mask and score.
         """
-        # 解析不同API版本的返回格式
+        # Parse return formats across SAM3 API versions.
         if isinstance(output, dict):
             if "masks" in output:
                 masks = output["masks"]
@@ -224,7 +221,7 @@ class Sam3Engine:
         if len(masks) == 0:
             return None, 0.0
         
-        # 找到有效索引
+        # Keep all masks above threshold, or the best mask when none pass.
         valid_indices = torch.where(scores > threshold)[0]
         
         if len(valid_indices) == 0:

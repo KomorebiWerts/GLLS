@@ -63,24 +63,19 @@ class MCTSNode:
         self.visits = 0
         self.value = 0.0
         self.leaf_reward = 0.0
-        # 如果 Node 内部真的需要调用它，就保存引用；否则可以直接删掉这个属性
         self.logic_preprocessor = shared_processor
         self.untried_actions = list(available_actions) if available_actions else []
         self.heatmap_score = state.get('heatmap_score', 0.0)
         
-    # === 新增：手动断开引用的方法 ===
     def destroy(self):
-        """手动断开循环引用，加速 GC"""
+        """Break cyclic references so GC can reclaim the tree promptly."""
         self.parent = None
         self.state = None
-        self.logic_preprocessor = None # 只是断开引用，不销毁对象（因为是共享的）
+        self.logic_preprocessor = None
         for child in self.children.values():
             child.destroy()
         self.children.clear()
 
-# ==========================================
-# 2. Agent 类
-# ==========================================
 class MCTSQuestionSample:
     DEFAULT_MCTS_SIMULATIONS = 50
     DEFAULT_MCTS_MAX_DEPTH = 4
@@ -153,22 +148,18 @@ class MCTSQuestionSample:
         }
     
     def cleanup(self):
-        """显式清理 MCTS 树和重对象"""
-        # 1. 清理搜索树
+        """Release MCTS tree state and heavyweight object references."""
         if hasattr(self, 'root') and self.root:
             self.root.destroy()
             self.root = None
 
-        # 2. 清理 SAM 和 推理引擎的引用 (不是销毁引擎本身，是断开引用)
         self.sam_engine = None
         self.inference_engine = None
         self.localizer = None
 
-        # 3. 清理图像缓存
         self.image = None
         self.debug_logic_view_img = None
 
-        # 4. 清理 RAG 缓存引用
         self.rag_agent = None
         self.rag_cache = None
         self.rag_blocks = None
@@ -176,15 +167,13 @@ class MCTSQuestionSample:
     @staticmethod
     def clear_sam_cache(sam_engine):
         """
-        静态方法：清理SAM引擎的图像缓存
-        SAM在set_image后会在GPU上缓存特征图，需要定期清理
+        Clear SAM image features cached after set_image().
         """
         if sam_engine is None:
             return
         try:
             if hasattr(sam_engine, 'predictor'):
                 predictor = sam_engine.predictor
-                # 尝试清理各种可能的缓存属性
                 if hasattr(predictor, 'reset_image'):
                     predictor.reset_image()
                 if hasattr(predictor, 'features'):
@@ -196,7 +185,7 @@ class MCTSQuestionSample:
                 if hasattr(predictor, 'is_image_set'):
                     predictor.is_image_set = False
         except Exception:
-            pass  # SAM清理失败不影响主流程
+            pass
 
     def _extract_atlas_context_text(self, include_global=False):
         lines = []
@@ -767,7 +756,7 @@ class MCTSQuestionSample:
         target_w = w + 2 * pad_w
         target_h = h + 2 * pad_h
         
-        # Size Cap: 不超过全图 50%
+        # Cap expanded crops to half of the full image.
         max_allowed_w = self.image_width // 2
         max_allowed_h = self.image_height // 2
         target_w = min(target_w, max_allowed_w)
@@ -889,7 +878,7 @@ class MCTSQuestionSample:
             new_state, 
             parent=parent_node, 
             available_actions=self.action_policy.local_actions(new_state, pixel_threshold=self.pixel_threshold),
-            shared_processor=self.logic_preprocessor # 传递 Agent 持有的那个唯一实例
+            shared_processor=self.logic_preprocessor
         )
 
     def selection(self, node):
@@ -1088,7 +1077,6 @@ class MCTSQuestionSample:
             },
             'global_regions': regions
         }
-        # [修改] 创建根节点时也一样
         self.root = MCTSNode(
             root_state, 
             available_actions=root_actions,
@@ -1187,22 +1175,18 @@ class MCTSQuestionSample:
         content_list.append({"type": "text", "text": "=== PHASE 1: GLOBAL INSPECTION ===\n"})
         content_list.append({"type": "text", "text": "You are a strict industrial QA inspector.\n"})
         
-        # 如果有 logic_report（结构性检查结果），先告知 VLM
         if logic_report and "[Logic Engine]" in logic_report:
             content_list.append({"type": "text", "text": f"{logic_report}\n\n"})
         
-        # 关键修改 1: 明确分离“参考标准”和“待测图片”
         if rag_content_list:
             content_list.append({"type": "text", "text": "Below is the REFERENCE KNOWLEDGE (The 'Rulebook'). Do NOT assume the target image follows these rules.\n"})
             content_list.extend(rag_content_list)
             content_list.append({"type": "text", "text": "\n=============================================\n"})
 
-        # 添加待测图
         content_list.append({"type": "text", "text": "(TARGET IMAGE - The object you must inspect):\n"})
         content_list.append({"type": "image", "image": self.image.convert("RGB")})
         
-        # 关键修改 2: 强制分步思维链 (Chain of Thought)
-        # 强迫模型先输出视觉事实，再进行比对
+        # Force visual observations before option selection.
         if self.task_policy.is_object_task:
             prompt = (
                 "INSTRUCTION: Perform global object QA analysis strictly following these steps. Do not skip steps.\n\n"
@@ -1971,7 +1955,7 @@ class MCTSQuestionSample:
         global_heatmap = self.root.state['heatmap_array']
         W, H = self.image.size
 
-        # === [MEMORY FIX] 预先记录用于返回的debug信息，避免保留整个树引用 ===
+        # Store scalar debug fields before releasing tree references.
         heatmap_peak_score = float(self.root.state['heatmap_score']) if hasattr(self, 'root') else 0.0
 
         if self.task_policy.use_local_anomaly_stream:
@@ -2525,7 +2509,6 @@ class MCTSQuestionSample:
             has_stage1_info = self.global_conclusion and self.global_conclusion != "None" and len(self.global_conclusion) > 0
 
             if has_stage1_info and logic_says_defect :
-                # Case A: 使用了 logical_mvtec 的确定性分析，优先采信
                 prompt += (
                     f"**Integrated Diagnosis Task (Logic Engine Mode)**:\n"
                     f"1. **Input Analysis**: Refer to the **Stage 1 Logic Report** (provided in context above) and the **Visual View** with a Red Contour.\n"
@@ -2534,7 +2517,6 @@ class MCTSQuestionSample:
                     f"4. **Decision**: Select the option that aligns best with the Stage 1 Report.\n"
                 )
             elif has_stage1_info:
-                # Case B: 有 Stage 1 信息但来自 VLM 推理，需要综合判断
                 prompt += (
                     f"**Integrated Diagnosis Task (Synthesis Mode)**:\n"
                     f"1. **Input Analysis**: You have TWO sources of information:\n"
@@ -2548,7 +2530,6 @@ class MCTSQuestionSample:
                     f"4. **Decision**: Select the option that best matches your integrated analysis, prioritizing visual evidence.\n"
                 )
             else:
-                # Case C: 没有 Stage 1 信息，完全依赖视觉
                 prompt += (
                     f"**Visual Localization Task**:\n"
                     f"1. **Input Analysis**: No prior textual logic report is available. Focus entirely on the **Visual View** with the Red Contour.\n"
@@ -2586,7 +2567,6 @@ class MCTSQuestionSample:
                         f"Please directly select the option corresponding to 'Good' or 'Normal'.\n"
                     )
                 else:
-                    # [修复] 非定位问题也需要区分是否使用了 logic_engine
                     if logic_says_defect:
                         prompt += (
                             f"**Situation**: The PHASE 1 Logic Engine has provided a definitive structural analysis.\n"
@@ -2626,7 +2606,6 @@ class MCTSQuestionSample:
 
         verification_strategy = "staged"
 
-        # === [MEMORY FIX] 构建返回字典 ===
         result = {
             "status": "ready",
             "red_box_image": annotated_global if proposals else self.image.convert("RGB"),
@@ -2748,7 +2727,6 @@ class MCTSQuestionSample:
             }
         }
 
-        # === [CRITICAL MEMORY FIX] 立即清理MCTS树，防止显存泄露 ===
         if hasattr(self, 'root') and self.root:
             self.root.destroy()
             self.root = None

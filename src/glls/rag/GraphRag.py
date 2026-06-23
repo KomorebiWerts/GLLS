@@ -8,29 +8,25 @@ import re
 from typing import Any, List, Dict, Union, Optional
 from pydantic import BaseModel, Field
 
-# 引入 SentenceTransformer
 from sentence_transformers import SentenceTransformer, util
 from glls import paths as glls_paths
 from glls.rag.semantic_grounding import SemanticOptionGrounder
 from glls.rag.source_chain import KNOWLEDGE_SOURCE_TYPE
 
-# ==========================================
-# 1. 数据 Schema (升级版：支持缺陷对比)
-# ==========================================
+# Knowledge schema with defect-distinction support.
 
 class Distinction(BaseModel):
-    """描述当前缺陷与另一个易混淆缺陷的区别"""
-    target_defect: str  # 易混淆的目标缺陷名 (e.g., "poke_sheath")
-    difference: str     # 区分逻辑 (e.g., "Cut is linear, Poke is round.")
+    """Difference between the current defect and a visually similar defect."""
+    target_defect: str
+    difference: str
 
 class DefectPattern(BaseModel):
-    """描述某个部位可能出现的具体缺陷模式"""
-    type: str                     # e.g., "cut_outer_insulation"
-    visual_signature: str         # e.g., "Jagged slice or tear..."
-    contrast_vs_normal: str       # e.g., "Normal is smooth..."
+    """Defect pattern that can appear in one inspected region."""
+    type: str
+    visual_signature: str
+    contrast_vs_normal: str
     visual_attributes: Optional[List[str]] = None
     examples: Optional[List[str]] = None
-    # [新增] 易混淆对比列表
     distinctions: Optional[List[Distinction]] = [] 
 
 class RegionNode(BaseModel):
@@ -44,9 +40,7 @@ class IndustrialKnowledgeBase(BaseModel):
     target_object: str
     regions: Dict[str, RegionNode] 
 
-# ==========================================
-# 2. 语义图谱引擎
-# ==========================================
+# Semantic graph engine.
 
 class SimInspecGraphEngine:
     def __init__(self, embedding_model_name=None):
@@ -101,7 +95,7 @@ class SimInspecGraphEngine:
         return text
 
     def load_json(self, json_data: Union[str, Dict]):
-        """加载 JSON 并构建 Region-Based 图谱 (包含对比关系)"""
+        """Load JSON and build a region-based graph with distinction edges."""
         if isinstance(json_data, str):
             data_dict = json.loads(json_data)
         else:
@@ -118,13 +112,12 @@ class SimInspecGraphEngine:
         self.G.clear()
         self.G.add_node(self.root_name, type="root", label=self.root_name)
         
-        print(f"正在构建 [{self.root_name}] 的部位感知图谱 (含对比逻辑)...")
+        print(f"Building region-aware graph for [{self.root_name}] with distinction logic...")
 
         corpus_texts = []
         self.node_names = []
 
         for region_key, region_data in kb_data.regions.items():
-            # 1. Region Node
             self.G.add_node(
                 region_key, 
                 type="region", 
@@ -135,9 +128,8 @@ class SimInspecGraphEngine:
             )
             self.G.add_edge(self.root_name, region_key, relation="has_region")
 
-            # 2. Defect Nodes & Distinctions
             for defect in region_data.defects:
-                defect_node_id = f"{region_key}_{defect.type}" # 唯一ID
+                defect_node_id = f"{region_key}_{defect.type}"
                 
                 self.G.add_node(
                     defect_node_id,
@@ -149,12 +141,9 @@ class SimInspecGraphEngine:
                 )
                 self.G.add_edge(region_key, defect_node_id, relation="possible_anomaly")
 
-                # [新增] 处理对比逻辑 (Distinctions)
                 if defect.distinctions:
                     for dist in defect.distinctions:
-                        # 假设易混淆对象也在同一部位下
                         target_id = f"{region_key}_{dist.target_defect}"
-                        # 添加一条红色的“对比边”
                         self.G.add_edge(
                             defect_node_id, 
                             target_id, 
@@ -162,7 +151,6 @@ class SimInspecGraphEngine:
                             logic=dist.difference
                         )
 
-            # 3. Embedding Prep
             rich_text = self._compute_region_text(region_key, region_data)
             corpus_texts.append(rich_text)
             self.node_names.append(region_key)
@@ -171,11 +159,7 @@ class SimInspecGraphEngine:
             print(f"[RAG] Encoding {len(corpus_texts)} region nodes...")
             self.node_embeddings = self.encoder.encode(corpus_texts, convert_to_tensor=True)
         
-        print(f"✅ 图谱构建完成! 包含 {self.G.number_of_nodes()} 个节点。")
-
-    # ==========================================
-    # 3. 检索与查询接口
-    # ==========================================
+        print(f"Graph build complete with {self.G.number_of_nodes()} nodes.")
 
     def search_regions(self, query: str, top_k: int = 3) -> List[str]:
         if self.node_embeddings is None: return []
@@ -186,7 +170,7 @@ class SimInspecGraphEngine:
 
     def get_inspection_checklist(self, region_name: str) -> Dict[str, Union[str, List[str]]]:
         """
-        [增强版] 获取检查清单，会自动包含 "VS" 对比信息。
+        Return the inspection checklist, including distinction metadata.
         """
         if not self.G.has_node(region_name):
             return {"error": "Region not found"}
@@ -556,9 +540,7 @@ class SimInspecGraphEngine:
             "note": "Internal PVLA topology audit only; do not inject option mappings into the final VLM prompt.",
         }
 
-    # ==========================================
-    # 4. 持久化
-    # ==========================================
+    # Persistence.
 
     def save_to_disk(self, save_path: str):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)

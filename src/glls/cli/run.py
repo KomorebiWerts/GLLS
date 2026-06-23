@@ -359,8 +359,8 @@ async def run_worker_async(rank, device, samples, args, graph_cache_root, log_fi
         f.write(f"=== Worker {rank} Init ===\nModel: {args.model_type} (vLLM={vlm_engine.use_vllm})\nDevice: {device}\n\n")
 
     for i, sample in enumerate(tqdm(samples, desc=f"Worker {rank}", position=rank)):
-        mcts_agent = None  # 确保变量在 try 块外部定义
-        mcts_output = {}   # 确保变量在 try 块外部定义
+        mcts_agent = None
+        mcts_output = {}
         try:
             if sample.get("annotation") is not True:
                 continue
@@ -395,39 +395,32 @@ async def run_worker_async(rank, device, samples, args, graph_cache_root, log_fi
                 sam_engine=sam_engine
             )
             
-            # === 修改开始: 增强 Debug 信息 ===
             try:
                 mcts_output = await mcts_agent.process()
             except Exception as e:
-                # 1. 在控制台打印醒目的错误头，包含当前 Worker 和 样本索引
                 print(f"\n🔥🔥🔥 [Worker {rank}] CRITICAL ERROR processing sample {i}!")
                 print(f"Image: {sample['image_path']}")
                 print(f"Question: {sample['question']}")
                 
-                # 2. 打印完整的堆栈信息 (这才是 debug 的关键)
                 traceback.print_exc()
                 
-                # 3. 将详细错误写入单独的错误日志文件 (避免控制台刷屏看不清)
                 error_entry = {
                     "sample_index": i,
                     "image": sample["image_path"],
                     "error_msg": str(e),
                     "traceback": traceback.format_exc()
                 }
-                # 使用追加模式写入 jsonl 或者简单追加到错误列表文件
                 try:
                     with open(error_file, "a", encoding="utf-8") as ef:
                         ef.write(json.dumps(error_entry) + "\n")
                 except:
                     pass
 
-                # 4. 保持原有的 fallback 逻辑，防止整个程序崩溃
                 mcts_output = {
                     "text": "Error", 
                     "error": str(e), 
                     "prompt": f"SYSTEM ERROR: {str(e)}\nTraceback logged."
                 }
-            # === 修改结束 ===~
 
             final_content = []
             instruction_text = mcts_output.get("prompt", "")
@@ -521,21 +514,16 @@ async def run_worker_async(rank, device, samples, args, graph_cache_root, log_fi
             continue
 
         finally:
-            # === [CRITICAL FIX: 显存泄漏修复核心] ===
-
-            # 1. 手动销毁 MCTS 树（切断循环引用）
+            # Release MCTS state and image-heavy outputs between samples.
             if mcts_agent:
                 try:
                     mcts_agent.cleanup()
                 except Exception as e:
                     print(f"⚠️ MCTS cleanup error: {e}")
 
-            # 2. 删除 MCTS 输出中的图像引用（这些是PIL图像，占用大量内存）
             if 'mcts_output' in locals() and isinstance(mcts_output, dict):
-                # 清理红框标注图
                 if 'red_box_image' in mcts_output:
                     del mcts_output['red_box_image']
-                # 清理裁剪图列表
                 if 'crop_images' in mcts_output:
                     for img in mcts_output.get('crop_images', []):
                         del img
@@ -544,33 +532,28 @@ async def run_worker_async(rank, device, samples, args, graph_cache_root, log_fi
                     for img in mcts_output.get('prompt_crop_images', []):
                         del img
                     del mcts_output['prompt_crop_images']
-                # 清理RAG内容列表（可能包含多个参考图像）
                 if 'rag_content_list' in mcts_output:
                     for item in mcts_output.get('rag_content_list', []):
                         if isinstance(item, dict) and 'image' in item:
                             del item['image']
                     del mcts_output['rag_content_list']
-                # 清理logic debug图像
                 if 'logic_debug_info' in mcts_output:
                     if isinstance(mcts_output['logic_debug_info'], dict):
                         if 'view_image' in mcts_output['logic_debug_info']:
                             del mcts_output['logic_debug_info']['view_image']
                     del mcts_output['logic_debug_info']
 
-            # 3. 删除当前循环产生的重对象引用
             if 'mcts_agent' in locals():
                 del mcts_agent
             if 'mcts_output' in locals():
                 del mcts_output
 
-            # 4. 清理 final_content（包含5-10张图像的列表）
             if 'final_content' in locals():
                 for item in final_content:
                     if isinstance(item, dict) and 'image' in item:
                         del item['image']
                 del final_content
 
-            # 5. 清理其他图像引用
             if 'img_pil' in locals():
                 del img_pil
             if 'response' in locals():
@@ -579,14 +562,11 @@ async def run_worker_async(rank, device, samples, args, graph_cache_root, log_fi
                 del row['image']
                 del row
 
-            # 6. 周期性清理SAM缓存（每5个样本）
             if i % 50 == 0 and sam_engine is not None:
                 try:
-                    # SAM3可能有reset_image或clear_cache方法
                     if hasattr(sam_engine, 'predictor'):
                         if hasattr(sam_engine.predictor, 'reset_image'):
                             sam_engine.predictor.reset_image()
-                        # 清理可能的图像缓存
                         if hasattr(sam_engine.predictor, 'features'):
                             sam_engine.predictor.features = None
                         if hasattr(sam_engine.predictor, 'original_size'):
@@ -594,17 +574,14 @@ async def run_worker_async(rank, device, samples, args, graph_cache_root, log_fi
                         if hasattr(sam_engine.predictor, 'input_size'):
                             sam_engine.predictor.input_size = None
                 except Exception as e:
-                    pass  # SAM清理失败不影响主流程
+                    pass
 
-            # 7. 强制运行 Python 垃圾回收（清理 CPU 内存中的循环引用对象）
             gc.collect()
 
-            # 8. 清理 PyTorch 显存缓存
             torch.cuda.empty_cache()
 
-            # 9. 周期性深度同步清理（每10个样本）
             if i % 100 == 0:
-                torch.cuda.synchronize()  # 确保所有CUDA操作完成
+                torch.cuda.synchronize()
                 gc.collect()
                 torch.cuda.empty_cache()
 
@@ -692,14 +669,12 @@ def merge_results(output_dir, num_workers):
     temp_dir = os.path.join(output_dir, "temp_results")
     all_results = []
     
-    # 统计数据结构
     detailed_stats = defaultdict(lambda: defaultdict(lambda: {
         "total": 0, "correct": 0,
         "normal_total": 0, "normal_correct": 0,
         "abnormal_total": 0, "abnormal_correct": 0
     }))
     
-    # === 错题收集结构 (按类别和任务分类) ===
     # {subclass: {task_type: [list of wrong samples]}}
     wrong_samples_collector = defaultdict(lambda: defaultdict(list))
     
@@ -707,7 +682,6 @@ def merge_results(output_dir, num_workers):
     
     print("Merging results and generating debug files...")
     
-    # 1. 收集所有结果
     for i in range(num_workers):
         res_file = os.path.join(temp_dir, f"results_rank_{i}.json")
         if os.path.exists(res_file):
@@ -719,23 +693,19 @@ def merge_results(output_dir, num_workers):
             except Exception as e:
                 print(f"Error reading {res_file}: {e}")
 
-    # 2. 遍历结果进行统计和错题收集
     for res in tqdm(all_results, desc="Processing Results"):
         subclass = res["subclass"]
         task_type = res["task_type"]
         is_correct = res["correct"]
         is_normal = res["is_normal"]
         
-        # 基础统计
         stats_entry = detailed_stats[subclass][task_type]
         stats_entry["total"] += 1
         if is_correct:
             stats_entry["correct"] += 1
         else:
-            # === 将错题加入收集器 ===
             wrong_samples_collector[subclass][task_type].append(res)
             
-        # 详细统计 (用于计算平衡正确率)
         if is_normal:
             stats_entry["normal_total"] += 1
             if is_correct:
@@ -745,28 +715,21 @@ def merge_results(output_dir, num_workers):
             if is_correct:
                 stats_entry["abnormal_correct"] += 1
 
-    # === 3. 统一写入错题文件 ===
-    # 遍历收集器，按 {Category}/{Task_Type}.json 格式写入
     for category, task_map in wrong_samples_collector.items():
-        # 创建 Category 目录 (例如 wrong_samples/leather/)
         cat_dir = os.path.join(wrong_samples_root, category)
         os.makedirs(cat_dir, exist_ok=True)
         
         for task_type, samples in task_map.items():
-            # 写入 Task_Type.json (例如 wrong_samples/leather/anomaly_detection.json)
-            # 为了防止文件名非法字符，简单处理一下
             safe_task_name = "".join([c if c.isalnum() or c in ['_','-'] else '_' for c in task_type])
             file_path = os.path.join(cat_dir, f"{safe_task_name}.json")
             
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(samples, f, indent=4)
 
-    # --- 保存文件 4: 纯结果列表 (官方格式) ---
     official_json_path = os.path.join(output_dir, "final_official_format.json")
     with open(official_json_path, "w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=4)
 
-    # --- 生成 FINAL REPORT TEXT ---
     final_stats_summary = {}
     report_path = os.path.join(output_dir, "final_report.txt")
     report_content = "============================================================\n"
@@ -821,7 +784,6 @@ def merge_results(output_dir, num_workers):
             global_metrics[task_type]["bal_acc_sum"] += bal_acc_percent
             global_metrics[task_type]["bal_acc_count"] += 1
             
-            # 记录错题数量到 stats summary
             wrong_count = len(wrong_samples_collector[category][task_type])
             
             final_stats_summary[category][task_type] = {
@@ -841,7 +803,6 @@ def merge_results(output_dir, num_workers):
         total_correct_all += cat_correct
         total_count_all += cat_total
 
-    # --- 总体统计部分 ---
     report_content += "============================================================\n"
     overall_avg = (total_correct_all / total_count_all * 100) if total_count_all > 0 else 0.0
     report_content += f"OVERALL AVERAGE: {overall_avg:.2f}% ({total_correct_all}/{total_count_all})\n"
@@ -912,14 +873,11 @@ def assert_complete_result_count(output_dir: str, expected_total: int) -> None:
 def main(args):
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # 动态导入加载器
     from glls.data.dataset_loader import DSMVTecDatasetLoader, VisaDatasetLoader
     
     database_root = glls_paths.database_root()
     graph_cache_root = args.graph_cache_root or os.path.join(database_root, "graph_index")
 
-    # === 数据集选择逻辑 ===
-    # 自动补充数据集路径
     if args.dataset.lower() == 'mvtec':
         if "DS-MVTec" not in args.dataset_root:
              args.dataset_root = os.path.join(args.dataset_root, "DS-MVTec")
@@ -999,14 +957,12 @@ if __name__ == "__main__":
         pass
 
     parser = argparse.ArgumentParser()
-    # === 通用参数 ===
     parser.add_argument("--gpus", type=str, default="7")
     parser.add_argument("--model_path", default=glls_paths.vlm_model_path())
     parser.add_argument("--model_type", type=str, default="qwen3")
     parser.add_argument("--use_vllm", action='store_true', default=True)
     parser.add_argument("--sam_path", default=glls_paths.sam3_path())
     
-    # === 数据集相关 ===
     parser.add_argument("--dataset", type=str, default='visa', choices=['mvtec', 'visa'], 
                         help="Choose dataset: mvtec or visa")
     parser.add_argument("--dataset_root", default=glls_paths.dataset_root())
@@ -1032,7 +988,6 @@ if __name__ == "__main__":
         default="method",
         help="Store compact method provenance by default; use full to also save prompts/raw responses.",
     )
-    # === Localizer 关键参数 ===
     parser.add_argument(
         "--localizer",
         choices=["auto", "abound", "adaptclip"],

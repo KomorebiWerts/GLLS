@@ -59,12 +59,29 @@ def _read_model_config(config_path):
         with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
     except Exception as exc:
-        print(f"⚠️ Warning: Failed to read model config at {path}: {exc}")
+        print(f"Warning: Failed to read model config at {path}: {exc}")
         return {}
     return payload if isinstance(payload, dict) else {}
 
 
-def _adaptclip_model_config(checkpoint_path):
+_MODEL_DIR = Path(__file__).resolve().parent
+
+
+def _package_model_config(*relative_parts):
+    return _read_model_config(_MODEL_DIR.joinpath(*relative_parts, "model_config.json"))
+
+
+def _deep_merge_config(base, override):
+    merged = dict(base or {})
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_config(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _external_adaptclip_model_config(checkpoint_path):
     path = Path(str(checkpoint_path or ""))
     candidates = []
     if path.is_file():
@@ -81,66 +98,53 @@ def _adaptclip_model_config(checkpoint_path):
     return {}
 
 
+def _abound_model_config(save_path):
+    package_config = _package_model_config("ABounD", "VVCLIP_lib")
+    external_config = {}
+    if str(save_path or ""):
+        external_config = _read_model_config(Path(str(save_path)) / "model_config.json")
+    return _deep_merge_config(package_config, external_config)
+
+
+def _adaptclip_model_config(checkpoint_path):
+    package_config = _package_model_config("AdaptCLIP", "adaptcliplib")
+    external_config = _external_adaptclip_model_config(checkpoint_path)
+    return _deep_merge_config(package_config, external_config)
+
+
+def _threshold_tables(config):
+    thresholds = config.get("thresholds", {}) if isinstance(config, dict) else {}
+    return _float_table(thresholds.get("image")), _float_table(thresholds.get("pixel"))
+
+
+def _threshold_tables_by_shot(config):
+    thresholds_by_shot = config.get("thresholds_by_shot", {}) if isinstance(config, dict) else {}
+    image_by_shot = {}
+    pixel_by_shot = {}
+    if not isinstance(thresholds_by_shot, dict):
+        return image_by_shot, pixel_by_shot
+    for shot_text, threshold_group in thresholds_by_shot.items():
+        try:
+            shot = int(str(shot_text).replace("-shot", ""))
+        except ValueError:
+            continue
+        if not isinstance(threshold_group, dict):
+            continue
+        image_table = _float_table(threshold_group.get("image"))
+        pixel_table = _float_table(threshold_group.get("pixel"))
+        if image_table:
+            image_by_shot[shot] = image_table
+        if pixel_table:
+            pixel_by_shot[shot] = pixel_table
+    return image_by_shot, pixel_by_shot
+
+
 class ABounD_Localizer():
-    # === 1. 定义不同数据集的专属配置 ===
-    _CONFIGS = {
-        'mvtec': {
-            'depth': 7,
-            'n_ctx': 11,
-            'spe': 4,
-            'weights': [0.15, 0.35, 0.35, 0.15], # w0, w1, w2, w3
-            'features_list': [6, 12, 18, 24],
-            'num_visual_finetune_layers': 12
-        },
-        'visa': {
-            'depth': 7,      # Visa 配置
-            'n_ctx': 16,     # Visa 上下文通常更长
-            'spe': 5,        # Visa spe 设置
-            'weights': [0.15, 0.35, 0.35, 0.15], # 假设 Visa 权重
-            'features_list': [6, 12, 18, 24],
-            'num_visual_finetune_layers': 8  # Visa 可能 finetune 层数不同
-        }
-    }
-
-    # === ABounD 专属阈值 (原 mcts_sam.py 中的数据，保持不变) ===
-    # 图像级阈值 (Optimal Image Threshold)
-    _IMAGE_THRESHOLDS = {
-        # --- MVTec ---
-        "bottle": 0.9793, "cable": 0.9399, "capsule": 0.8669, "carpet": 0.9738,
-        "grid": 0.8922, "hazelnut": 0.8891, "leather": 1.1001, "metal_nut": 0.9746,
-        "pill": 0.9254, "screw": 0.7795, "tile": 0.9947, "toothbrush": 0.9795,
-        "transistor": 0.8117, "wood": 1.0526, "zipper": 0.7919,
-        # --- VisA ---
-        "candle": 0.9148, "cashew": 0.8979, "capsules": 0.90997, "chewinggum": 0.8573,
-        "fryum": 0.82, "macaroni1": 0.8253, "macaroni2": 0.908, "pcb1": 0.9222,
-        "pcb2": 0.9289, "pcb3": 0.9328, "pcb4": 0.8864, "pipe_fryum": 0.8505 
-    }
-
-    # 像素级阈值 (Best Pixel-F1 Threshold)
-    _PIXEL_THRESHOLDS = {
-        # --- MVTec ---
-        "bottle": 0.8423, "cable": 0.8221, "capsule": 0.7557, "carpet": 1.0006,
-        "grid": 0.9747, "hazelnut": 0.8070, "leather": 1.09, "metal_nut": 0.8439,
-        "pill": 0.7117, "screw": 0.7, "tile": 0.8250, "toothbrush": 0.8754,
-        "transistor": 0.6279, "wood": 0.92, "zipper": 0.6,
-        # --- VisA ---
-        "candle": 0.82, "cashew": 0.7635, "capsules": 0.8175, "chewinggum": 0.77,
-        "fryum": 0.6274, "macaroni1": 0.74, "macaroni2": 0.9393, "pcb1": 0.8464,
-        "pcb2": 0.8813, "pcb3": 0.78, "pcb4": 0.7571, "pipe_fryum": 0.7478
-    }
-
     def __init__(self, args, device_id=0, device=None):
         self.args = args
-        self._image_thresholds = dict(self._IMAGE_THRESHOLDS)
-        self._pixel_thresholds = dict(self._PIXEL_THRESHOLDS)
-        model_config = _read_model_config(Path(str(getattr(args, "save_path", ""))) / "model_config.json")
-        thresholds = model_config.get("thresholds", {}) if isinstance(model_config, dict) else {}
-        config_image_thresholds = _float_table(thresholds.get("image"))
-        config_pixel_thresholds = _float_table(thresholds.get("pixel"))
-        if config_image_thresholds:
-            self._image_thresholds.update(config_image_thresholds)
-        if config_pixel_thresholds:
-            self._pixel_thresholds.update(config_pixel_thresholds)
+        model_config = _abound_model_config(getattr(args, "save_path", ""))
+        self._configs = dict(model_config.get("localizer_configs") or {})
+        self._image_thresholds, self._pixel_thresholds = _threshold_tables(model_config)
 
         deps = _load_abound_dependencies()
         self._MultivariateNormal = deps["MultivariateNormal"]
@@ -159,15 +163,13 @@ class ABounD_Localizer():
         else:
             self.device = f"cuda:{device_id}" if torch.cuda.is_available() else "cpu"
 
-        # === 2. 加载配置并覆盖 args 中的默认值 ===
         dataset_name = args.dataset.lower()
-        if dataset_name not in self._CONFIGS:
+        if dataset_name not in self._configs:
             print(f"⚠️ Warning: Dataset '{dataset_name}' not in config. Defaulting to 'mvtec'.")
-            self.cfg = self._CONFIGS['mvtec']
+            self.cfg = self._configs['mvtec']
         else:
-            self.cfg = self._CONFIGS[dataset_name]
+            self.cfg = self._configs[dataset_name]
         
-        # 将配置参数绑定到 self
         self.depth = self.cfg['depth']
         self.n_ctx = self.cfg['n_ctx']
         self.spe = self.cfg['spe']
@@ -176,14 +178,12 @@ class ABounD_Localizer():
         self.num_visual_finetune_layers = self.cfg['num_visual_finetune_layers']
         self.image_size = args.image_size
 
-        # === 3. Backbone checkpoint path ===
         self.checkpoint_full_path = os.path.join(args.checkpoint_path, "ViT-L-14-336px.pt")
         
         print(f"[{dataset_name.upper()}] Localizer Configured:")
         print(f"  -> Params: depth={self.depth}, ctx={self.n_ctx}, spe={self.spe}")
         print(f"  -> Loading Backbone: {self.checkpoint_full_path}")
 
-        # === 4. 加载模型 ===
         VVCLIP_parameters = {
             "Prompt_length": self.n_ctx, 
             "learnabel_text_embedding_depth": self.depth,
@@ -304,8 +304,8 @@ class ABounD_Localizer():
         branch is only used for unknown categories, where the old behavior was a
         fixed 0.9/0.9 default.
         """
-        image_thresholds = getattr(self, "_image_thresholds", self._IMAGE_THRESHOLDS)
-        pixel_thresholds = getattr(self, "_pixel_thresholds", self._PIXEL_THRESHOLDS)
+        image_thresholds = getattr(self, "_image_thresholds", {})
+        pixel_thresholds = getattr(self, "_pixel_thresholds", {})
         if category in image_thresholds or category in pixel_thresholds:
             return HeatmapThresholds(
                 image=float(image_thresholds.get(category, 0.9)),
@@ -419,185 +419,22 @@ class AdaptCLIP_Localizer():
     AdaptCLIP Zero-Shot Localizer (k_shots=0 mode).
     Strictly follows the logic in test.py for the no-memory branch.
     """
-    _CONFIGS = {
-        'default': {
-            'image_size': 518,
-            'features_list': [6, 12, 18, 24],
-            'n_ctx': 12,
-            'vl_reduction': 4,
-            'sigma': 4,       
-            'fusion_type': 'average_mean' 
-        }
-    }
-    
-    # AdaptCLIP thresholds calibrated on MMAD test data.
-    # Image thresholds use image best-F1; pixel thresholds use anomaly-mask pixel best-F1.
-    _IMAGE_THRESHOLDS_BY_SHOT = {
-        0: {
-            # --- VisA ---
-            "candle": 0.492197,
-            "capsules": 0.468662,
-            "cashew": 0.462056,
-            "chewinggum": 0.243132,
-            "fryum": 0.294960,
-            "macaroni1": 0.450678,
-            "macaroni2": 0.432695,
-            "pcb1": 0.418049,
-            "pcb2": 0.324668,
-            "pcb3": 0.399457,
-            "pcb4": 0.401730,
-            "pipe_fryum": 0.415181,
-            # --- MVTec ---
-            "bottle": 0.521602,
-            "cable": 0.633561,
-            "capsule": 0.662371,
-            "carpet": 0.749844,
-            "grid": 0.566117,
-            "hazelnut": 0.643178,
-            "leather": 0.793466,
-            "metal_nut": 0.826857,
-            "pill": 0.672302,
-            "screw": 0.584296,
-            "tile": 0.629624,
-            "toothbrush": 0.642064,
-            "transistor": 0.695740,
-            "wood": 0.659023,
-            "zipper": 0.601005,
-        },
-        1: {
-            # --- VisA ---
-            "candle": 0.218004,
-            "capsules": 0.217441,
-            "cashew": 0.187064,
-            "chewinggum": 0.168488,
-            "fryum": 0.176613,
-            "macaroni1": 0.205907,
-            "macaroni2": 0.203645,
-            "pcb1": 0.238018,
-            "pcb2": 0.193589,
-            "pcb3": 0.220342,
-            "pcb4": 0.218458,
-            "pipe_fryum": 0.270058,
-            # --- MVTec ---
-            "bottle": 0.240687,
-            "cable": 0.289088,
-            "capsule": 0.193763,
-            "carpet": 0.274225,
-            "grid": 0.266388,
-            "hazelnut": 0.357254,
-            "leather": 0.356350,
-            "metal_nut": 0.312918,
-            "pill": 0.232602,
-            "screw": 0.220036,
-            "tile": 0.295386,
-            "toothbrush": 0.287488,
-            "transistor": 0.273907,
-            "wood": 0.302756,
-            "zipper": 0.177794,
-        },
-    }
-
-    _PIXEL_THRESHOLDS_BY_SHOT = {
-        0: {
-            # --- VisA ---
-            "candle": 0.438111,
-            "capsules": 0.429234,
-            "cashew": 0.333404,
-            "chewinggum": 0.588078,
-            "fryum": 0.283982,
-            "macaroni1": 0.408517,
-            "macaroni2": 0.476349,
-            "pcb1": 0.272632,
-            "pcb2": 0.347578,
-            "pcb3": 0.260592,
-            "pcb4": 0.337110,
-            "pipe_fryum": 0.315041,
-            # --- MVTec ---
-            "bottle": 0.385266,
-            "cable": 0.412920,
-            "capsule": 0.422589,
-            "carpet": 0.456064,
-            "grid": 0.540987,
-            "hazelnut": 0.470359,
-            "leather": 0.634212,
-            "metal_nut": 0.429602,
-            "pill": 0.357995,
-            "screw": 0.353140,
-            "tile": 0.419157,
-            "toothbrush": 0.369372,
-            "transistor": 0.347801,
-            "wood": 0.600865,
-            "zipper": 0.223319,
-        },
-        1: {
-            # --- VisA ---
-            "candle": 0.147633,
-            "capsules": 0.123421,
-            "cashew": 0.117580,
-            "chewinggum": 0.216259,
-            "fryum": 0.101908,
-            "macaroni1": 0.178247,
-            "macaroni2": 0.166722,
-            "pcb1": 0.163179,
-            "pcb2": 0.144446,
-            "pcb3": 0.133241,
-            "pcb4": 0.131448,
-            "pipe_fryum": 0.141771,
-            # --- MVTec ---
-            "bottle": 0.140620,
-            "cable": 0.153849,
-            "capsule": 0.110823,
-            "carpet": 0.149830,
-            "grid": 0.200830,
-            "hazelnut": 0.198961,
-            "leather": 0.227905,
-            "metal_nut": 0.167134,
-            "pill": 0.147910,
-            "screw": 0.150780,
-            "tile": 0.138218,
-            "toothbrush": 0.180899,
-            "transistor": 0.116187,
-            "wood": 0.243519,
-            "zipper": 0.091548,
-        },
-    }
-
     def __init__(self, args, device=None, pretrained_model='ViT-L/14@336px'):
         self.device = device if device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
-        self.cfg = self._CONFIGS['default']
+        checkpoint_path = getattr(args, 'checkpoint_path', None)
+        model_config = _adaptclip_model_config(checkpoint_path)
+        localizer_configs = model_config.get("localizer_configs") or {}
+        self.cfg = dict(localizer_configs["default"])
         self.k_shot = int(getattr(args, "k_shot", 0) or 0)
         self.active_category = None
         self.prompt_image_memory = {}
         self.prompt_patch_memory = {}
         self.last_image_score = None
-        self._image_thresholds_by_shot = {
-            int(shot): dict(table) for shot, table in self._IMAGE_THRESHOLDS_BY_SHOT.items()
-        }
-        self._pixel_thresholds_by_shot = {
-            int(shot): dict(table) for shot, table in self._PIXEL_THRESHOLDS_BY_SHOT.items()
-        }
+        self._image_thresholds_by_shot, self._pixel_thresholds_by_shot = _threshold_tables_by_shot(model_config)
         
         # Override default config with args if present
         if hasattr(args, 'image_size'):
             self.cfg['image_size'] = args.image_size
-            
-        checkpoint_path = getattr(args, 'checkpoint_path', None)
-        model_config = _adaptclip_model_config(checkpoint_path)
-        thresholds_by_shot = model_config.get("thresholds_by_shot", {}) if isinstance(model_config, dict) else {}
-        if isinstance(thresholds_by_shot, dict):
-            for shot_text, threshold_group in thresholds_by_shot.items():
-                try:
-                    shot = int(str(shot_text).replace("-shot", ""))
-                except ValueError:
-                    continue
-                if not isinstance(threshold_group, dict):
-                    continue
-                image_table = _float_table(threshold_group.get("image"))
-                pixel_table = _float_table(threshold_group.get("pixel"))
-                if image_table:
-                    self._image_thresholds_by_shot.setdefault(shot, {}).update(image_table)
-                if pixel_table:
-                    self._pixel_thresholds_by_shot.setdefault(shot, {}).update(pixel_table)
         
         print(f"[AdaptCLIP] Initializing Zero-Shot Localizer...")
         
@@ -698,10 +535,10 @@ class AdaptCLIP_Localizer():
         Unknown categories use an adaptive map-derived fallback.
         """
         shot_key = 1 if self.k_shot > 0 else 0
-        image_by_shot = getattr(self, "_image_thresholds_by_shot", self._IMAGE_THRESHOLDS_BY_SHOT)
-        pixel_by_shot = getattr(self, "_pixel_thresholds_by_shot", self._PIXEL_THRESHOLDS_BY_SHOT)
-        image_thresholds = image_by_shot.get(shot_key, image_by_shot[0])
-        pixel_thresholds = pixel_by_shot.get(shot_key, pixel_by_shot[0])
+        image_by_shot = getattr(self, "_image_thresholds_by_shot", {})
+        pixel_by_shot = getattr(self, "_pixel_thresholds_by_shot", {})
+        image_thresholds = image_by_shot.get(shot_key) or image_by_shot.get(0, {})
+        pixel_thresholds = pixel_by_shot.get(shot_key) or pixel_by_shot.get(0, {})
         if category in image_thresholds:
             img_thresh = float(image_thresholds[category])
             return HeatmapThresholds(

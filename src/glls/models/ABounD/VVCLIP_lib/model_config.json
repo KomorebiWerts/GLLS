@@ -1,0 +1,101 @@
+{
+  "schema": "glls_abound_model_config_v1",
+  "localizer_configs": {
+    "mvtec": {
+      "depth": 7,
+      "n_ctx": 11,
+      "spe": 4,
+      "weights": [
+        0.15,
+        0.35,
+        0.35,
+        0.15
+      ],
+      "features_list": [
+        6,
+        12,
+        18,
+        24
+      ],
+      "num_visual_finetune_layers": 12
+    },
+    "visa": {
+      "depth": 7,
+      "n_ctx": 16,
+      "spe": 5,
+      "weights": [
+        0.15,
+        0.35,
+        0.35,
+        0.15
+      ],
+      "features_list": [
+        6,
+        12,
+        18,
+        24
+      ],
+      "num_visual_finetune_layers": 8
+    }
+  },
+  "thresholds": {
+    "image": {
+      "bottle": 0.9793,
+      "cable": 0.9399,
+      "capsule": 0.8669,
+      "carpet": 0.9738,
+      "grid": 0.8922,
+      "hazelnut": 0.8891,
+      "leather": 1.1001,
+      "metal_nut": 0.9746,
+      "pill": 0.9254,
+      "screw": 0.7795,
+      "tile": 0.9947,
+      "toothbrush": 0.9795,
+      "transistor": 0.8117,
+      "wood": 1.0526,
+      "zipper": 0.7919,
+      "candle": 0.9148,
+      "cashew": 0.8979,
+      "capsules": 0.90997,
+      "chewinggum": 0.8573,
+      "fryum": 0.82,
+      "macaroni1": 0.8253,
+      "macaroni2": 0.908,
+      "pcb1": 0.9222,
+      "pcb2": 0.9289,
+      "pcb3": 0.9328,
+      "pcb4": 0.8864,
+      "pipe_fryum": 0.8505
+    },
+    "pixel": {
+      "bottle": 0.8423,
+      "cable": 0.8221,
+      "capsule": 0.7557,
+      "carpet": 1.0006,
+      "grid": 0.9747,
+      "hazelnut": 0.807,
+      "leather": 1.09,
+      "metal_nut": 0.8439,
+      "pill": 0.7117,
+      "screw": 0.7,
+      "tile": 0.825,
+      "toothbrush": 0.8754,
+      "transistor": 0.6279,
+      "wood": 0.92,
+      "zipper": 0.6,
+      "candle": 0.82,
+      "cashew": 0.7635,
+      "capsules": 0.8175,
+      "chewinggum": 0.77,
+      "fryum": 0.6274,
+      "macaroni1": 0.74,
+      "macaroni2": 0.9393,
+      "pcb1": 0.8464,
+      "pcb2": 0.8813,
+      "pcb3": 0.78,
+      "pcb4": 0.7571,
+      "pipe_fryum": 0.7478
+    }
+  }
+}

@@ -587,17 +587,13 @@ class AdaptCLIP(nn.Module):
 
 
 def harmonic_mean(tensor_list):
-    # 将列表中的张量堆叠成一个四维张量
     stacked_tensors = torch.stack(tensor_list)  # shape: (N, B, C, H, W)
 
-    # 计算每个元素的倒数
     reciprocal_tensors = 1.0 / stacked_tensors  # shape: (N, B, C, H, W)
 
-    # 计算倒数的和
     reciprocal_sum = torch.sum(reciprocal_tensors, dim=0)  # shape: (B, C, H, W)
 
-    # 计算调和平均
-    n = stacked_tensors.size(0)  # N: 张量的数量
+    n = stacked_tensors.size(0)
     h_mean = n / reciprocal_sum  # shape: (B, C, H, W)
 
     return h_mean
@@ -909,7 +905,6 @@ class TextualAdapter(nn.Module):
 
         # Random Initialization
         print("Initializing class-specific contexts")
-        # n_ctx_pos代表learnable token的长度，ctx_dim表示prompt的dimension
         ctx_vectors_pos = torch.empty(1, 1, n_ctx_pos, ctx_dim, dtype=dtype)
         ctx_vectors_neg = torch.empty(1, 1, n_ctx_neg, ctx_dim, dtype=dtype)
         nn.init.normal_(ctx_vectors_pos, std=0.02)
@@ -932,7 +927,6 @@ class TextualAdapter(nn.Module):
             tokenized_prompts_neg.append(tokenize(p_neg))
         tokenized_prompts_pos = torch.cat(tokenized_prompts_pos)
         tokenized_prompts_neg = torch.cat(tokenized_prompts_neg)
-        #生成相应的text embedding
         with torch.no_grad():
             embedding_pos = clip_model.token_embedding(tokenized_prompts_pos).type(dtype)
             embedding_neg = clip_model.token_embedding(tokenized_prompts_neg).type(dtype)

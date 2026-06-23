@@ -3705,9 +3705,9 @@ def main():
     parser.add_argument("--show_api", action="store_true", help="Show Gradio API docs.")
     args = parser.parse_args()
 
-    # Gradio 会用 httpx 对本地地址做连通性检查；若系统设置了 http_proxy/https_proxy，
-    # 可能导致本地请求也走代理，从而出现 httpx.ConnectError: [Errno 111] Connection refused。
-    # 这里显式设置 NO_PROXY/no_proxy，确保 localhost/loopback 不走代理。
+    # Gradio uses httpx for local connectivity checks. If http_proxy or
+    # https_proxy is set, localhost requests may be routed through the proxy and
+    # fail with httpx.ConnectError. Keep loopback traffic out of the proxy.
     _no_proxy_hosts = "localhost,127.0.0.1,0.0.0.0"
     os.environ["NO_PROXY"] = ",".join(
         [h for h in (os.environ.get("NO_PROXY", ""), _no_proxy_hosts) if h]

@@ -294,8 +294,8 @@ class Transformer(nn.Module):
 
 def softmax(x):
     x_exp = x.exp()  # m * n
-    partition = x_exp.sum(dim=-1, keepdim=True)  # 按列累加, m * 1
-    return x_exp / partition  # 广播机制, [m * n] / [m * 1] = [m * n]
+    partition = x_exp.sum(dim=-1, keepdim=True)
+    return x_exp / partition
 
 class Attention(nn.Module):
     def __init__(self, out_dim, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., settings=''):
@@ -559,7 +559,7 @@ class VisionTransformer(nn.Module):
 
         if self.proj is not None:
             pooled = pooled @ self.proj
-            # patch_tokens = patch_tokens @ self.proj  # 不知道能不能行
+            # patch_tokens = patch_tokens @ self.proj
             # tokens = tokens @ self.proj
         if self.output_tokens:
             return pooled, patch_tokens
