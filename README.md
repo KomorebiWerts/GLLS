@@ -1,45 +1,62 @@
 # GLLS
 
-Global Logic and Local Semantic inspection for industrial anomaly question answering.
+Global Logic and Local Semantic inspection for industrial anomaly question
+answering.
 
-GLLS is a method-focused research implementation for MMAD-style industrial visual
-QA. The released code keeps one clean path:
+GLLS is a method-focused research implementation for MMAD-style industrial
+visual QA. It answers each question by combining global image reasoning, local
+anomaly evidence, SAM3 structural cutouts, and PVLA/RAG graph knowledge, with
+compact traces for inspecting how the final answer was selected.
 
-- `glls.cli.run`: batch QA evaluation on DS-MVTec and VisA.
-- `glls.cli.binary_ad`: binary anomaly detection on MPDD, DTD-Synthetic, and DAGM.
-- `glls.cli.visualize`: one Gradio frontend for per-question online inspection.
+Main entrypoints:
+
+- 🧪 `glls.cli.run`: batch QA evaluation on DS-MVTec and VisA.
+- ⚙️ `glls.cli.binary_ad`: binary anomaly detection on MPDD, DTD-Synthetic, and
+  DAGM.
+- 🖥️ `glls.cli.visualize`: one Gradio frontend for per-question online
+  inspection.
 
 Users only need to configure dataset/model paths and use the curated QA
 annotations in `qa_collection/`.
+
+## 🎯 Motivation
+
+Industrial visual QA often fails when a model only sees the whole image or only
+receives unstructured local crops. GLLS treats each answer as evidence search:
+the model first forms a global judgment, then checks local anomaly proposals,
+segmentation-backed structural cues, and source-backed normal knowledge.
 
 <p align="center">
   <img src="docs/assets/motivation.png" alt="GLLS motivation and benchmark summary" width="900">
 </p>
 
-## 🔎 Method Overview
+The motivation figure summarizes the gap between direct visual QA and a
+traceable inspection pipeline on industrial anomaly questions.
+
+## 🧠 Method Overview
+
+GLLS combines four components:
+
+1. **🌐 Global inspection**: a VLM first reasons over the full target image and
+   the question/options.
+2. **🔍 Local evidence search**: AdaptCLIP produces anomaly heatmaps;
+   MCTS expands and ranks local region proposals instead of passing every crop
+   blindly to the VLM.
+3. **✂️ SAM3 refinement**: SAM3 is used when the task and category benefit from
+   structural/local segmentation. Text and box prompts are selected from
+   conservative category profiles in `src/glls/seg/sam3_profiles.py`.
+4. **🧩 PVLA/RAG knowledge**: source-backed graph knowledge is retrieved from
+   normal references and text knowledge, then passed to the VLM as hierarchical
+   visual/text evidence.
 
 <p align="center">
   <img src="docs/assets/framework.png" alt="GLLS framework" width="900">
 </p>
 
-GLLS combines four components:
-
-1. **Global inspection**: a VLM first reasons over the full target image and
-   the question/options.
-2. **Local evidence search**: AdaptCLIP produces anomaly heatmaps;
-   MCTS expands and ranks local region proposals instead of passing every crop
-   blindly to the VLM.
-3. **SAM3 refinement**: SAM3 is used when the task and category benefit from
-   structural/local segmentation. Text and box prompts are selected from
-   conservative category profiles in `src/glls/seg/sam3_profiles.py`.
-4. **PVLA/RAG knowledge**: source-backed graph knowledge is retrieved from
-   normal references and text knowledge, then passed to the VLM as hierarchical
-   visual/text evidence.
-
 This keeps the code aligned with the paper idea: global logic, local semantic
 evidence, graph-structured normal knowledge, and traceable local search.
 
-## 🧾 Why This Release Includes a Curated QA Collection
+## 🧾 Curated QA Collection
 
 The original MMAD QA annotations are noisy enough to affect evaluation:
 
