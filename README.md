@@ -53,9 +53,6 @@ GLLS combines four components:
   <img src="docs/assets/framework.png" alt="GLLS framework" width="900">
 </p>
 
-This keeps the code aligned with the paper idea: global logic, local semantic
-evidence, graph-structured normal knowledge, and traceable local search.
-
 ## 🧾 Curated QA Collection
 
 The original MMAD QA annotations are noisy enough to affect evaluation:
