@@ -17,7 +17,8 @@ Main entrypoints:
   inspection.
 
 Users only need to configure dataset/model paths and use the curated QA
-annotations in `qa_collection/`.
+annotations in `qa_collection/`; do not evaluate with the raw MMAD `QA.json`
+files.
 
 ## 🎯 Motivation
 
@@ -66,8 +67,11 @@ The original MMAD QA annotations are noisy enough to affect evaluation:
   the corresponding corrected MVTec `pill` annotation.
 
 `qa_collection/` fixes annotation issues only. It does not change any MMAD image.
-The collection is still a curated research annotation set, not a claim that every
-remaining QA row is perfect.
+For reproducibility, treat it as a replacement annotation root for the MMAD QA
+files. In particular, use `qa_collection/DS-MVTec/pill/QA.json` instead of the
+raw MMAD `DS-MVTec/pill/QA.json`; the upstream pill QA file is the known
+contamination case. The collection is still a curated research annotation set,
+not a claim that every remaining QA row is perfect.
 
 The activation script uses this bundled collection by default. To override it,
 set:
@@ -184,8 +188,11 @@ GLLS/
 
 ## 🧱 Data and Checkpoint Setup
 
-Place MMAD-style QA datasets under the path configured by
-`GLLS_DATASET_ROOT`:
+Download MMAD from the upstream project
+[`jam-cc/mmad`](https://github.com/jam-cc/mmad) or the Hugging Face mirror
+[`jiang-cc/MMAD`](https://huggingface.co/datasets/jiang-cc/MMAD). For the QA
+experiments in this repository, place the MMAD image folders used by GLLS under
+the path configured by `GLLS_DATASET_ROOT`:
 
 ```text
 $GLLS_DATASET_ROOT/
@@ -193,12 +200,31 @@ $GLLS_DATASET_ROOT/
   VisA/<category>/...
 ```
 
-The curated QA annotations are already in this repository:
+Only these image/data folders are read from the downloaded MMAD tree. The raw
+MMAD annotation files are not the evaluation annotations for this repository.
+Point `GLLS_QA_ROOT` at the curated QA annotations shipped here:
 
 ```text
 $GLLS_QA_ROOT/
   DS-MVTec/<category>/QA.json
   VisA/<category>/QA.json
+```
+
+The default `scripts/dev/local_paths.example.sh` already sets
+`GLLS_QA_ROOT` to this repository's `qa_collection/`. Keep that setting unless
+you intentionally maintain a separate curated QA copy. If you do keep a separate
+QA root, copy or sync this repository's `qa_collection/DS-MVTec/pill/QA.json`
+over any raw MMAD `DS-MVTec/pill/QA.json` file before evaluating `pill`; this is
+the known MMAD contamination point where QA content was mixed with content from
+another dataset/category.
+
+Quick path check:
+
+```bash
+test -d "$GLLS_DATASET_ROOT/DS-MVTec/pill/image"
+test -d "$GLLS_DATASET_ROOT/VisA/candle/test/good"
+test -f "$GLLS_QA_ROOT/DS-MVTec/pill/QA.json"
+test -f "$GLLS_QA_ROOT/VisA/candle/QA.json"
 ```
 
 For binary anomaly detection, configure these optional paths:
