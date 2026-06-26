@@ -62,16 +62,11 @@ The original MMAD QA annotations are noisy enough to affect evaluation:
 - Some questions have multiple valid options.
 - Some questions have no valid option.
 - Some options are inconsistent with the image or the declared task type.
-- DS-MVTec `pill` contains a known contamination problem where QA content was
-  mixed with content from another dataset/category; the curated collection uses
-  the corresponding corrected MVTec `pill` annotation.
 
 `qa_collection/` fixes annotation issues only. It does not change any MMAD image.
 For reproducibility, treat it as a replacement annotation root for the MMAD QA
-files. In particular, use `qa_collection/DS-MVTec/pill/QA.json` instead of the
-raw MMAD `DS-MVTec/pill/QA.json`; the upstream pill QA file is the known
-contamination case. The collection is still a curated research annotation set,
-not a claim that every remaining QA row is perfect.
+files. The collection is still a curated research annotation set, not a claim
+that every remaining QA row is perfect.
 
 The activation script uses this bundled collection by default. To override it,
 set:
@@ -212,11 +207,21 @@ $GLLS_QA_ROOT/
 
 The default `scripts/dev/local_paths.example.sh` already sets
 `GLLS_QA_ROOT` to this repository's `qa_collection/`. Keep that setting unless
-you intentionally maintain a separate curated QA copy. If you do keep a separate
-QA root, copy or sync this repository's `qa_collection/DS-MVTec/pill/QA.json`
-over any raw MMAD `DS-MVTec/pill/QA.json` file before evaluating `pill`; this is
-the known MMAD contamination point where QA content was mixed with content from
-another dataset/category.
+you intentionally maintain a separate curated QA copy.
+
+MMAD `DS-MVTec/pill` also has a separate image-level contamination issue in some
+copies: the initial files in `DS-MVTec/pill/image/good/` are `metal_nut` images,
+not `pill` images. In the copy used for this release, `000.png` through
+`021.png` matched `DS-MVTec/metal_nut/image/good/`. Before evaluating `pill`,
+replace the whole `DS-MVTec/pill/image/good/` folder with the corresponding
+official MVTec-AD `pill/test/good/` images, preserving the MMAD-style filenames
+`000.png` through `025.png`. The fixed local layout should contain:
+
+```text
+$GLLS_DATASET_ROOT/
+  DS-MVTec/pill/image/good/000.png ... 025.png   # copied from MVTec-AD pill/test/good
+  DS-MVTec/pill/QA.json                          # not used when GLLS_QA_ROOT points at qa_collection
+```
 
 Quick path check:
 

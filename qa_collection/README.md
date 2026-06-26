@@ -20,8 +20,7 @@ qa_collection/
 
 The original MMAD QA annotations contain visible annotation noise, including
 wrong answers, questions with multiple valid options, questions with no valid
-option, and a known DS-MVTec `pill` contamination case where QA content was
-mixed with content from another dataset/category.
+option, and options inconsistent with the image or task type.
 
 For reproducible GLLS runs:
 
@@ -29,6 +28,9 @@ For reproducible GLLS runs:
 - Use this directory as `GLLS_QA_ROOT` for all QA annotations.
 - If you keep QA files inside a separate MMAD-style tree, replace the raw MMAD
   `DS-MVTec/pill/QA.json` with `qa_collection/DS-MVTec/pill/QA.json`.
+- Fix the separate MMAD image issue before evaluating `pill`: some MMAD copies
+  have `metal_nut` images at the start of `DS-MVTec/pill/image/good/`. Replace
+  that `good/` folder with the official MVTec-AD `pill/test/good/` images.
 
 This curated collection fixes only annotation issues; it does not alter MMAD
 images.
