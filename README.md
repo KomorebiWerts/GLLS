@@ -1,89 +1,62 @@
 # GLLS
 
-Global Logic and Local Semantic inspection for industrial anomaly question
-answering.
+Global Logic and Local Semantic inspection for industrial anomaly QA.
 
-GLLS is a method-focused research implementation for MMAD-style industrial
-visual QA. It answers each question by combining global image reasoning, local
-anomaly evidence, SAM3 structural cutouts, and PVLA/RAG graph knowledge, with
-compact traces for inspecting how the final answer was selected.
+GLLS runs MMAD-style visual QA with a global VLM pass, local anomaly evidence,
+SAM3 cutouts, and PVLA/RAG graph knowledge. The repo also includes a binary
+anomaly-detection path for MPDD, DTD-Synthetic, and DAGM.
 
 Main entrypoints:
 
-- 🧪 `glls.cli.run`: batch QA evaluation on DS-MVTec and VisA.
-- ⚙️ `glls.cli.binary_ad`: binary anomaly detection on MPDD, DTD-Synthetic, and
-  DAGM.
-- 🖥️ `glls.cli.visualize`: one Gradio frontend for per-question online
-  inspection.
+- `glls.cli.run`: DS-MVTec and VisA QA evaluation.
+- `glls.cli.binary_ad`: MPDD, DTD-Synthetic, and DAGM binary AD.
+- `glls.cli.visualize`: Gradio frontend for single-question inspection.
 
-Users only need to configure dataset/model paths and use the curated QA
-annotations in `qa_collection/`; do not evaluate with the raw MMAD `QA.json`
-files.
+## Motivation
 
-## 🎯 Motivation
-
-Industrial visual QA often fails when a model only sees the whole image or only
-receives unstructured local crops. GLLS treats each answer as evidence search:
-the model first forms a global judgment, then checks local anomaly proposals,
-segmentation-backed structural cues, and source-backed normal knowledge.
+Industrial visual QA is brittle when the model only sees the whole image, or
+when it receives crops without context. GLLS keeps the whole-image answer, local
+heatmap evidence, SAM3 masks, and retrieved normal references in one trace.
 
 <p align="center">
   <img src="docs/assets/motivation.png" alt="GLLS motivation and benchmark summary" width="900">
 </p>
 
-The motivation figure summarizes the gap between direct visual QA and a
-traceable inspection pipeline on industrial anomaly questions.
-
-## 🧠 Method Overview
+## Method Overview
 
 GLLS combines four components:
 
-1. **🌐 Global inspection**: a VLM first reasons over the full target image and
-   the question/options.
-2. **🔍 Local evidence search**: the configured localizer produces anomaly
-   heatmaps; MCTS expands and ranks local region proposals instead of passing
-   every crop blindly to the VLM.
-3. **✂️ SAM3 refinement**: SAM3 is used when the task and category benefit from
-   structural/local segmentation. Text and box prompts are selected from
-   conservative category profiles in `src/glls/seg/sam3_profiles.py`.
-4. **🧩 PVLA/RAG knowledge**: source-backed graph knowledge is retrieved from
-   normal references and text knowledge, then passed to the VLM as hierarchical
-   visual/text evidence.
+1. **Global inspection**: a VLM reads the full image, question, and options.
+2. **Local evidence search**: the localizer produces heatmaps, and MCTS ranks
+   candidate regions instead of sending every crop to the VLM.
+3. **SAM3 refinement**: SAM3 refines selected regions with conservative category
+   prompts from `src/glls/seg/sam3_profiles.py`.
+4. **PVLA/RAG knowledge**: the VLM receives retrieved normal-reference and graph
+   evidence alongside the target image.
 
 <p align="center">
   <img src="docs/assets/framework.png" alt="GLLS framework" width="900">
 </p>
 
-## 🧾 Curated QA Collection
+## Dataset Notes
 
-The original MMAD QA annotations are noisy enough to affect evaluation:
-
-- Some questions have the wrong answer label.
-- Some questions have multiple valid options.
-- Some questions have no valid option.
-- Some options are inconsistent with the image or the declared task type.
-
-`qa_collection/` fixes annotation issues only. It does not change any MMAD image.
-For reproducibility, treat it as a replacement annotation root for the MMAD QA
-files. The collection is still a curated research annotation set, not a claim
-that every remaining QA row is perfect.
-
-The activation script uses this bundled collection by default. To override it,
-set:
+Use the MMAD images, but use this repo's QA files:
 
 ```bash
 export GLLS_QA_ROOT=/path/to/GLLS/qa_collection
 ```
 
-Expected layout:
+The raw MMAD `QA.json` files contain known label and option errors. The
+`qa_collection/` directory contains only replacement `QA.json` files; it does
+not contain or edit benchmark images.
 
-```text
-qa_collection/
-  DS-MVTec/<category>/QA.json
-  VisA/<category>/QA.json
-```
+Before running DS-MVTec `pill`, fix the image folder if your MMAD copy has this
+issue. In affected MMAD copies, `DS-MVTec/pill/image/good/000.png` through
+`021.png` are `metal_nut` images. Replace `DS-MVTec/pill/image/good/` with the
+official MVTec-AD
+`pill/test/good/` images (`000.png` through `025.png`).
 
-## 🚀 Quick Start From Zero
+## Quick Start From Zero
 
 The commands below assume Linux, CUDA, and Python 3.10 or newer. The default
 workspace is `~/data/GLLS`; change it once in `scripts/dev/local_paths.sh` if
@@ -158,7 +131,7 @@ Check the Hugging Face model card for the artifact license before redistributing
 the ABounD files. If no license is declared there, treat the artifact as
 research-use until the license is clarified.
 
-## 📁 Repository Layout
+## Repository Layout
 
 ```text
 GLLS/
@@ -181,52 +154,28 @@ GLLS/
     seg/                         # SAM3 engine and prompt profiles
 ```
 
-## 🧱 Data and Checkpoint Setup
+## Data and Checkpoint Setup
 
 Download MMAD from the upstream project
 [`jam-cc/mmad`](https://github.com/jam-cc/mmad) or the Hugging Face mirror
-[`jiang-cc/MMAD`](https://huggingface.co/datasets/jiang-cc/MMAD). For the QA
-experiments in this repository, place the MMAD image folders used by GLLS under
-the path configured by `GLLS_DATASET_ROOT`:
+[`jiang-cc/MMAD`](https://huggingface.co/datasets/jiang-cc/MMAD). The paths
+should look like this after setup:
 
 ```text
 $GLLS_DATASET_ROOT/
   DS-MVTec/<category>/...
   VisA/<category>/...
-```
 
-Only these image/data folders are read from the downloaded MMAD tree. The raw
-MMAD annotation files are not the evaluation annotations for this repository.
-Point `GLLS_QA_ROOT` at the curated QA annotations shipped here:
-
-```text
 $GLLS_QA_ROOT/
   DS-MVTec/<category>/QA.json
   VisA/<category>/QA.json
 ```
 
-The default `scripts/dev/local_paths.example.sh` already sets
-`GLLS_QA_ROOT` to this repository's `qa_collection/`. Keep that setting unless
-you intentionally maintain a separate curated QA copy.
-
-MMAD `DS-MVTec/pill` also has a separate image-level contamination issue in some
-copies: the initial files in `DS-MVTec/pill/image/good/` are `metal_nut` images,
-not `pill` images. In the copy used for this release, `000.png` through
-`021.png` matched `DS-MVTec/metal_nut/image/good/`. Before evaluating `pill`,
-replace the whole `DS-MVTec/pill/image/good/` folder with the corresponding
-official MVTec-AD `pill/test/good/` images, preserving the MMAD-style filenames
-`000.png` through `025.png`. The fixed local layout should contain:
-
-```text
-$GLLS_DATASET_ROOT/
-  DS-MVTec/pill/image/good/000.png ... 025.png   # copied from MVTec-AD pill/test/good
-  DS-MVTec/pill/QA.json                          # not used when GLLS_QA_ROOT points at qa_collection
-```
-
-Quick path check:
+Quick check:
 
 ```bash
-test -d "$GLLS_DATASET_ROOT/DS-MVTec/pill/image"
+test -f "$GLLS_DATASET_ROOT/DS-MVTec/pill/image/good/000.png"
+test -f "$GLLS_DATASET_ROOT/DS-MVTec/pill/image/good/025.png"
 test -d "$GLLS_DATASET_ROOT/VisA/candle/test/good"
 test -f "$GLLS_QA_ROOT/DS-MVTec/pill/QA.json"
 test -f "$GLLS_QA_ROOT/VisA/candle/QA.json"
@@ -257,7 +206,7 @@ MVTec/VisA 0-shot inspection and other frontend dataset/shot combinations use
 AdaptCLIP. Batch CLI runs remain explicit: pass `--localizer adaptclip` or
 `--localizer abound`.
 
-## 🧩 Build PVLA Graph Knowledge
+## Build PVLA Graph Knowledge
 
 PVLA graph caches are read from `GLLS_GRAPH_CACHE_ROOT`.
 
@@ -270,7 +219,7 @@ Run this after your text knowledge and normal-reference assets are placed under
 the configured database root. The QA and binary-AD entrypoints will then retrieve
 source-backed graph blocks from `GLLS_GRAPH_CACHE_ROOT`.
 
-## 🧪 Run DS-MVTec / VisA QA
+## Run DS-MVTec / VisA QA
 
 Check the available options:
 
@@ -319,7 +268,7 @@ Each result row includes prediction, answer parsing, heatmap evidence, MCTS
 action trace, SAM3 refinement audit, PVLA/RAG provenance, and final prompt
 evidence.
 
-## 🖥️ Run the Online Frontend
+## Run the Online Frontend
 
 ```bash
 source scripts/dev/activate_glls.sh
@@ -367,7 +316,7 @@ Representative frontend captures:
   <img src="docs/assets/frontend/frontend_run_visuals_pcb.png" alt="GLLS frontend PCB anomaly heatmap red-box trace and focus crop views" width="900">
 </p>
 
-## ⚙️ Run MPDD / DTD / DAGM Binary AD
+## Run MPDD / DTD / DAGM Binary AD
 
 Prepare dataset metadata and offline normal-reference PVLA/SAM3 assets:
 
