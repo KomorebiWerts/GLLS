@@ -21,6 +21,17 @@ from collections import defaultdict
 from PIL import Image
 
 from glls import paths as glls_paths
+from glls.runtime_config import (
+    abound_dataset_weight_paths,
+    default_adaptclip_checkpoint,
+    normalize_dataset_key,
+    parse_k_shot,
+    published_localizer_name,
+    resolve_adaptclip_checkpoint,
+    resolve_localizer_name,
+    runtime_weight_config,
+    runtime_weight_summary,
+)
 
 from transformers import (
     AutoProcessor, 
@@ -48,123 +59,43 @@ DEFAULT_VLM_MODEL_PATH = glls_paths.vlm_model_path()
 
 
 def _default_adaptclip_checkpoint(dataset_name):
-    domain = "visa" if str(dataset_name).lower() == "visa" else "mvtec"
-    return os.path.join(glls_paths.adaptclip_root(), "checkpoints", f"{domain}_epoch_15.pth")
+    return default_adaptclip_checkpoint(dataset_name)
 
 
 def _resolve_adaptclip_checkpoint(path_value, dataset_name):
-    if not path_value:
-        return _default_adaptclip_checkpoint(dataset_name)
-    if os.path.isdir(path_value):
-        domain = "visa" if str(dataset_name).lower() == "visa" else "mvtec"
-        candidates = [
-            os.path.join(path_value, "checkpoints", f"{domain}_epoch_15.pth"),
-            os.path.join(path_value, f"{domain}_epoch_15.pth"),
-        ]
-        for candidate in candidates:
-            if os.path.exists(candidate):
-                return candidate
-    return path_value
+    return resolve_adaptclip_checkpoint(path_value, dataset_name)
 
 
 DEFAULT_ADAPTCLIP_CHECKPOINT_PATH = _default_adaptclip_checkpoint("mvtec")
 
 
 def _normalize_dataset_name(dataset_name):
-    dataset_key = str(dataset_name or "").strip().lower()
+    dataset_key = normalize_dataset_key(dataset_name)
     return "visa" if dataset_key == "visa" else "mvtec"
 
 
 def _parse_k_shot(k_shot):
-    try:
-        return int(k_shot or 0)
-    except (TypeError, ValueError):
-        return 1
+    return parse_k_shot(k_shot)
 
 
 def _frontend_localizer_name(dataset_name, k_shot):
-    dataset_key = _normalize_dataset_name(dataset_name)
-    shot = int(k_shot or 0)
-    if dataset_key in {"mvtec", "visa"} and shot == 1:
-        return "abound"
-    return "adaptclip"
+    return published_localizer_name(dataset_name, k_shot)
 
 
 def _normalize_localizer_choice(localizer_choice, dataset_name, k_shot):
-    choice = str(localizer_choice or "Auto").strip().lower().replace("-", "").replace("_", "")
-    if choice in {"auto", ""}:
-        return _frontend_localizer_name(dataset_name, k_shot)
-    if choice == "abound":
-        return "abound"
-    if choice == "adaptclip":
-        return "adaptclip"
-    return _frontend_localizer_name(dataset_name, k_shot)
+    return resolve_localizer_name(localizer_choice, dataset_name, k_shot)
 
 
 def _abound_dataset_weight_paths(save_path, dataset_name):
-    dataset_key = _normalize_dataset_name(dataset_name)
-    return {
-        "lora": os.path.join(save_path, dataset_key, f"final_vvclip_model_state_{dataset_key}.pth"),
-        "soft_prompt": os.path.join(save_path, dataset_key, f"final_soft_prompt_state_{dataset_key}.pth"),
-        "memory_bank": os.path.join(save_path, dataset_key, f"final_memory_bank_{dataset_key}.pt"),
-    }
+    return abound_dataset_weight_paths(save_path, dataset_name)
 
 
 def _runtime_weight_config(dataset_name, localizer_choice, k_shot, adaptclip_ckpt_path):
-    dataset_key = _normalize_dataset_name(dataset_name)
-    shot = _parse_k_shot(k_shot)
-    localizer_name = _normalize_localizer_choice(localizer_choice, dataset_key, shot)
-
-    if localizer_name == "abound" and shot != 1:
-        raise ValueError("ABounD is available only for 1-shot runtime. Use AdaptCLIP for 0-shot.")
-
-    dataset_weight_paths = {}
-    if localizer_name == "abound":
-        checkpoint_path = glls_paths.abound_model_path()
-        save_path = glls_paths.abound_save_path()
-        dataset_weight_paths = _abound_dataset_weight_paths(save_path, dataset_key)
-    else:
-        checkpoint_path = _resolve_adaptclip_checkpoint(adaptclip_ckpt_path, dataset_key)
-        save_path = ""
-        dataset_weight_paths = {"checkpoint": checkpoint_path}
-
-    signature_payload = {
-        "dataset": dataset_key,
-        "localizer": localizer_name,
-        "k_shot": shot,
-        "checkpoint_path": checkpoint_path,
-        "save_path": save_path,
-        "dataset_weight_paths": dataset_weight_paths,
-    }
-    signature = json.dumps(signature_payload, sort_keys=True)
-    return {
-        "dataset_name": dataset_key,
-        "localizer_name": localizer_name,
-        "k_shot": shot,
-        "checkpoint_path": checkpoint_path,
-        "save_path": save_path,
-        "dataset_weight_paths": dataset_weight_paths,
-        "signature": signature,
-    }
+    return runtime_weight_config(dataset_name, localizer_choice, k_shot, adaptclip_ckpt_path)
 
 
 def _runtime_weight_summary(config):
-    localizer_label = "ABounD" if config["localizer_name"] == "abound" else "AdaptCLIP"
-    lines = [
-        f"Dataset: {config['dataset_name']}",
-        f"Localizer: {localizer_label} | Shot: {config['k_shot']}",
-    ]
-    if config["localizer_name"] == "abound":
-        weights = config["dataset_weight_paths"]
-        lines.extend([
-            f"Backbone: {config['checkpoint_path']}",
-            f"LoRA: {weights['lora']}",
-            f"Soft prompt: {weights['soft_prompt']}",
-            f"Memory bank: {weights['memory_bank']}",
-        ])
-    else:
-        lines.append(f"Checkpoint: {config['checkpoint_path']}")
-    return "\n".join(lines)
+    return runtime_weight_summary(config)
 
 
 def _runtime_config_error_html(message):

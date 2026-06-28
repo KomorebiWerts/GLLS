@@ -17,6 +17,7 @@ from collections import defaultdict
 import torch.multiprocessing as mp
 
 from glls import paths as glls_paths
+from glls.runtime_config import resolve_localizer_name, runtime_weight_config
 from glls.qa_trace import build_method_trace, binary_anomaly_decision_override
 
 PAPER_SCOPE_TASK_TYPES = {
@@ -118,32 +119,36 @@ def configure_localizer_for_category(localizer, args, category, support_cache):
 
 
 def resolve_localizer_choice(args):
-    requested = str(getattr(args, "localizer", "auto") or "auto").strip().lower()
-    if requested == "auto":
-        return "adaptclip"
-    return requested
+    return resolve_localizer_name(
+        getattr(args, "localizer", "auto"),
+        getattr(args, "dataset", ""),
+        getattr(args, "k_shot", 0),
+    )
 
 
 def configure_localizer_args(args, localizer_name):
-    if localizer_name == "adaptclip":
-        if not getattr(args, "checkpoint_path", ""):
-            domain = str(getattr(args, "adaptclip_checkpoint_domain", "auto") or "auto").strip().lower()
-            if domain == "auto":
-                domain = str(getattr(args, "dataset", "mvtec") or "mvtec").strip().lower()
-            args.checkpoint_path = os.path.join(
+    adaptclip_ckpt_path = getattr(args, "checkpoint_path", "")
+    if localizer_name == "adaptclip" and not adaptclip_ckpt_path:
+        domain = str(getattr(args, "adaptclip_checkpoint_domain", "auto") or "auto").strip().lower()
+        if domain != "auto":
+            adaptclip_ckpt_path = os.path.join(
                 glls_paths.adaptclip_root(),
                 "checkpoints",
                 f"{domain}_epoch_15.pth",
             )
-        if int(getattr(args, "image_size", 0) or 0) <= 0:
-            args.image_size = 518
-    elif localizer_name == "abound":
-        if not getattr(args, "checkpoint_path", ""):
-            args.checkpoint_path = glls_paths.abound_model_path()
-        if int(getattr(args, "image_size", 0) or 0) <= 0:
-            args.image_size = 336
-    else:
-        raise ValueError(f"Unsupported --localizer: {localizer_name}")
+    cfg = runtime_weight_config(
+        getattr(args, "dataset", ""),
+        localizer_name,
+        getattr(args, "k_shot", 0),
+        adaptclip_ckpt_path=adaptclip_ckpt_path,
+        adaptclip_root=glls_paths.adaptclip_root(),
+        abound_model_path=getattr(args, "checkpoint_path", "") or glls_paths.abound_model_path(),
+        abound_save_path=getattr(args, "save_path", "") or glls_paths.abound_save_path(),
+    )
+    args.checkpoint_path = cfg["checkpoint_path"]
+    args.save_path = cfg["save_path"]
+    if int(getattr(args, "image_size", 0) or 0) <= 0:
+        args.image_size = int(cfg["image_size"])
 
 
 # ==========================================
@@ -991,8 +996,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--localizer",
         choices=["auto", "abound", "adaptclip"],
-        default="adaptclip",
-        help="Published default is AdaptCLIP. ABounD is kept as an explicit local-only option.",
+        default="auto",
+        help="auto uses the published route: MVTec/VisA 1-shot ABounD, otherwise AdaptCLIP.",
     )
     parser.add_argument("--k_shot", type=int, default=1, help="Shot number")
     parser.add_argument(

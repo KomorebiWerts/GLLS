@@ -91,16 +91,17 @@ source scripts/dev/activate_glls.sh
 sets `PYTHONPATH`, model paths, dataset paths, graph-cache paths, and the Python
 environment used by the helper scripts.
 
-Download the localizer artifacts used by the frontend:
+Download the localizer artifacts used by the published runtime routes:
 
 ```bash
-# AdaptCLIP is used for 0-shot frontend runs and as the fallback localizer.
+# AdaptCLIP is used for 0-shot MVTec/VisA runs, MPDD/DTD/DAGM runs,
+# and as the fallback localizer.
 mkdir -p "$GLLS_ADAPTCLIP_ROOT/checkpoints"
 # Download the upstream AdaptCLIP MVTec and VisA adapter checkpoints, then place:
 #   $GLLS_ADAPTCLIP_ROOT/checkpoints/mvtec_epoch_15.pth
 #   $GLLS_ADAPTCLIP_ROOT/checkpoints/visa_epoch_15.pth
 
-# ABounD 1-shot artifact for the published MVTec/VisA frontend path.
+# ABounD 1-shot artifact for the published MVTec/VisA path.
 hf download komorebi01/glls-abound-1shot \
   --local-dir "$GLLS_ABOUND_SAVE_PATH"
 ```
@@ -130,6 +131,12 @@ export GLLS_ABOUND_SAVE_PATH="$GLLS_DATA_ROOT/models/glls-abound-1shot"
 Check the Hugging Face model card for the artifact license before redistributing
 the ABounD files. If no license is declared there, treat the artifact as
 research-use until the license is clarified.
+
+Verify that the published runtime route resolves as expected:
+
+```bash
+PYTHONPATH=src python scripts/dev/check_runtime_weight_config.py
+```
 
 ## Repository Layout
 
@@ -201,10 +208,16 @@ Recommended model resources:
 | Text embedding | [BAAI/bge-base-en-v1.5](https://huggingface.co/BAAI/bge-base-en-v1.5) | `GLLS_EMBEDDING_MODEL_PATH` |
 | ABounD 1-shot | [komorebi01/glls-abound-1shot](https://huggingface.co/komorebi01/glls-abound-1shot), including `model_config.json` | `GLLS_ABOUND_MODEL_PATH` / `GLLS_ABOUND_SAVE_PATH` |
 
-The frontend selects ABounD automatically for MVTec/VisA 1-shot inspection.
-MVTec/VisA 0-shot inspection and other frontend dataset/shot combinations use
-AdaptCLIP. Batch CLI runs remain explicit: pass `--localizer adaptclip` or
-`--localizer abound`.
+The published localizer route is shared by the batch CLI and frontend:
+
+| Dataset route | Shot | Localizer | Threshold/config source |
+| --- | ---: | --- | --- |
+| DS-MVTec / VisA QA | 1 | ABounD | ABounD `model_config.json` plus the downloaded `glls-abound-1shot` artifact |
+| DS-MVTec / VisA QA | 0 | AdaptCLIP | bundled AdaptCLIP `thresholds_by_shot["0"]` |
+| MPDD / DTD-Synthetic / DAGM binary AD | 0 or 1 | AdaptCLIP | the binary AD train-normal calibration used by the released scripts |
+
+Use `--localizer auto` for DS-MVTec/VisA QA to get this route. Explicit
+`--localizer adaptclip` and `--localizer abound` remain available for ablations.
 
 ## Build PVLA Graph Knowledge
 
@@ -240,9 +253,8 @@ python -m glls.cli.run \
   --graph_cache_root "$GLLS_GRAPH_CACHE_ROOT" \
   --model_path "$GLLS_VLM_MODEL_PATH" \
   --sam_path "$GLLS_SAM3_PATH" \
-  --localizer adaptclip \
+  --localizer auto \
   --k_shot 1 \
-  --adaptclip_checkpoint_domain mvtec \
   --output_dir outputs/mvtec_bottle
 ```
 
@@ -258,11 +270,14 @@ python -m glls.cli.run \
   --graph_cache_root "$GLLS_GRAPH_CACHE_ROOT" \
   --model_path "$GLLS_VLM_MODEL_PATH" \
   --sam_path "$GLLS_SAM3_PATH" \
-  --localizer adaptclip \
+  --localizer auto \
   --k_shot 1 \
-  --adaptclip_checkpoint_domain visa \
   --output_dir outputs/visa_candle
 ```
+
+For the 0-shot QA setting, keep the same command and set `--k_shot 0`.
+`--localizer auto` will switch to AdaptCLIP and load the matching MVTec or VisA
+checkpoint.
 
 Each result row includes prediction, answer parsing, heatmap evidence, MCTS
 action trace, SAM3 refinement audit, PVLA/RAG provenance, and final prompt
@@ -329,7 +344,11 @@ python scripts/data/prepare_binary_ad_offline.py --dataset all --max_refs 1 --wi
 Run the evaluator:
 
 ```bash
-python -m glls.cli.binary_ad --dataset all --output_dir outputs/binary_ad
+python -m glls.cli.binary_ad \
+  --dataset all \
+  --localizer adaptclip \
+  --k_shot 1 \
+  --output_dir outputs/binary_ad
 ```
 
 or:
@@ -337,6 +356,13 @@ or:
 ```bash
 bash scripts/run/run_binary_ad.sh
 ```
+
+Use `--k_shot 0` for the zero-shot binary-AD run. MPDD, DTD-Synthetic, and
+DAGM use AdaptCLIP in both 0-shot and 1-shot settings; the evaluator calibrates
+per-category decision thresholds from train-normal scores unless you explicitly
+pass `--threshold_policy table --threshold_table <file>` for a custom ablation.
+The binary-AD wrapper keeps the historical AdaptCLIP default domain `mvtec`
+unless you override `--adaptclip_checkpoint_domain`.
 
 The binary AD path keeps the same method structure: localizer heatmap scoring,
 MCTS-style region selection, SAM3 region refinement, and PVLA normal-reference
