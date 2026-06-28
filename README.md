@@ -210,11 +210,11 @@ Recommended model resources:
 
 The published localizer route is shared by the batch CLI and frontend:
 
-| Dataset route | Shot | Localizer | Threshold/config source |
+| Dataset route | Shot | Localizer | Decision parameter source |
 | --- | ---: | --- | --- |
-| DS-MVTec / VisA QA | 1 | ABounD | ABounD `model_config.json` plus the downloaded `glls-abound-1shot` artifact |
-| DS-MVTec / VisA QA | 0 | AdaptCLIP | bundled AdaptCLIP `thresholds_by_shot["0"]` |
-| MPDD / DTD-Synthetic / DAGM binary AD | 0 or 1 | AdaptCLIP | the binary AD train-normal calibration used by the released scripts |
+| DS-MVTec / VisA QA | 1 | ABounD | ABounD `model_config.json` `decision_parameters.heatmap`, normal-only source |
+| DS-MVTec / VisA QA | 0 | AdaptCLIP | bundled AdaptCLIP `decision_parameters.heatmap_by_shot` |
+| MPDD / DTD-Synthetic / DAGM binary AD | 0 or 1 | AdaptCLIP | bundled AdaptCLIP `decision_parameters.binary_ad` |
 
 Use `--localizer auto` for DS-MVTec/VisA QA to get this route. Explicit
 `--localizer adaptclip` and `--localizer abound` remain available for ablations.
@@ -341,14 +341,20 @@ python scripts/data/prepare_binary_ad_datasets.py
 python scripts/data/prepare_binary_ad_offline.py --dataset all --max_refs 1 --with_sam3
 ```
 
-Run the evaluator:
+Run the paper-comparable full binary-AD route:
 
 ```bash
-python -m glls.cli.binary_ad \
-  --dataset all \
-  --localizer adaptclip \
-  --k_shot 1 \
-  --output_dir outputs/binary_ad
+python scripts/eval/run_binary_ad_qwen3_sweep.py \
+  --shot 0 \
+  --output_root outputs/binary_ad/qwen3_full_0shot \
+  --gpus 0,2,3 \
+  --model_path /home/dataset_model/model/qwen3-vl-8B
+
+python scripts/eval/run_binary_ad_qwen3_sweep.py \
+  --shot 1 \
+  --output_root outputs/binary_ad/qwen3_full_1shot \
+  --gpus 0,2,3 \
+  --model_path /home/dataset_model/model/qwen3-vl-8B
 ```
 
 or:
@@ -357,12 +363,20 @@ or:
 bash scripts/run/run_binary_ad.sh
 ```
 
-Use `--k_shot 0` for the zero-shot binary-AD run. MPDD, DTD-Synthetic, and
-DAGM use AdaptCLIP in both 0-shot and 1-shot settings; the evaluator calibrates
-per-category decision thresholds from train-normal scores unless you explicitly
-pass `--threshold_policy table --threshold_table <file>` for a custom ablation.
-The binary-AD wrapper keeps the historical AdaptCLIP default domain `mvtec`
-unless you override `--adaptclip_checkpoint_domain`.
+Use `--k_shot 0` for the zero-shot wrapper run. MPDD, DTD-Synthetic, and DAGM
+use AdaptCLIP in both 0-shot and 1-shot settings. The paper-comparable route
+uses:
+
+- `--threshold_policy table`, with MPDD/DTD/DAGM decision cutoffs loaded from
+  `src/glls/models/AdaptCLIP/adaptcliplib/model_config.json`
+- `--binary_score_source localizer_image`
+- `--final_verifier qwen3 --final_verifier_policy anomaly_or`
+- scaled MCTS/SAM3 crop evidence and offline PVLA normal references
+
+The older train-normal `normal_robust` threshold route is only a lightweight
+ablation; it is not the paper-comparable binary split and can substantially
+underestimate MPDD/DTD. To run that ablation intentionally through the wrapper,
+set `GLLS_BINARY_AD_LIGHTWEIGHT=1`.
 
 The binary AD path keeps the same method structure: localizer heatmap scoring,
 MCTS-style region selection, SAM3 region refinement, and PVLA normal-reference

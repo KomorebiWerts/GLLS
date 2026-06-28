@@ -126,7 +126,7 @@ def main() -> None:
     parser.add_argument("--threshold_policy", default="normal_robust", choices=["normal_robust", "normal_quantile", "normal_median_mad", "fixed", "table"])
     parser.add_argument("--fixed_threshold", type=float, default=0.5)
     parser.add_argument("--threshold_table", default="", help="JSON file with per-dataset/category thresholds.")
-    parser.add_argument("--calibration_shots", type=int, default=-1, help="-1 uses all train-normal scores; 0 uses no train-normal calibration and requires --threshold_policy fixed; positive values use that many normal scores per category.")
+    parser.add_argument("--calibration_shots", type=int, default=-1, help="-1 uses all train-normal scores; 0 uses no train-normal calibration and requires --threshold_policy fixed or table; positive values use that many normal scores per category.")
     parser.add_argument("--max_region_proposals", type=int, default=3)
     parser.add_argument("--max_pvla_refs", type=int, default=3)
     parser.add_argument("--skip_offline_assets", action="store_true", help="Do not prepare/load offline PVLA/SAM3 normal-reference assets before evaluation.")

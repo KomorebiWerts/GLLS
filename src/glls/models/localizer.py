@@ -51,6 +51,18 @@ def _float_table(value):
     return table
 
 
+def _float_table_by_dataset(value):
+    direct = _float_table(value)
+    if direct:
+        return direct
+    table = {}
+    if not isinstance(value, dict):
+        return table
+    for group in value.values():
+        table.update(_float_table(group))
+    return table
+
+
 def _read_model_config(config_path):
     path = Path(config_path)
     if not path.exists():
@@ -113,12 +125,27 @@ def _adaptclip_model_config(checkpoint_path):
 
 
 def _threshold_tables(config):
-    thresholds = config.get("thresholds", {}) if isinstance(config, dict) else {}
+    if not isinstance(config, dict):
+        return {}, {}
+    decision_parameters = config.get("decision_parameters", {})
+    heatmap = decision_parameters.get("heatmap", {}) if isinstance(decision_parameters, dict) else {}
+    if isinstance(heatmap, dict):
+        image_table = _float_table_by_dataset(heatmap.get("image_level_cutoffs"))
+        pixel_table = _float_table_by_dataset(heatmap.get("pixel_level_cutoffs"))
+        if image_table or pixel_table:
+            return image_table, pixel_table
+    thresholds = config.get("thresholds", {})
     return _float_table(thresholds.get("image")), _float_table(thresholds.get("pixel"))
 
 
 def _threshold_tables_by_shot(config):
-    thresholds_by_shot = config.get("thresholds_by_shot", {}) if isinstance(config, dict) else {}
+    if not isinstance(config, dict):
+        return {}, {}
+    decision_parameters = config.get("decision_parameters", {})
+    heatmap_by_shot = decision_parameters.get("heatmap_by_shot", {}) if isinstance(decision_parameters, dict) else {}
+    thresholds_by_shot = heatmap_by_shot.get("shots", {}) if isinstance(heatmap_by_shot, dict) else {}
+    if not thresholds_by_shot:
+        thresholds_by_shot = config.get("thresholds_by_shot", {})
     image_by_shot = {}
     pixel_by_shot = {}
     if not isinstance(thresholds_by_shot, dict):
@@ -130,8 +157,12 @@ def _threshold_tables_by_shot(config):
             continue
         if not isinstance(threshold_group, dict):
             continue
-        image_table = _float_table(threshold_group.get("image"))
-        pixel_table = _float_table(threshold_group.get("pixel"))
+        image_table = _float_table_by_dataset(
+            threshold_group.get("image_level_cutoffs", threshold_group.get("image"))
+        )
+        pixel_table = _float_table_by_dataset(
+            threshold_group.get("pixel_level_cutoffs", threshold_group.get("pixel"))
+        )
         if image_table:
             image_by_shot[shot] = image_table
         if pixel_table:
@@ -310,7 +341,7 @@ class ABounD_Localizer():
             return HeatmapThresholds(
                 image=float(image_thresholds.get(category, 0.9)),
                 pixel=float(pixel_thresholds.get(category, 0.9)),
-                source="abound:calibrated",
+                source="abound:decision_parameters:normal_only_1shot",
             )
         if heatmap is not None:
             return adaptive_thresholds(
@@ -544,7 +575,7 @@ class AdaptCLIP_Localizer():
             return HeatmapThresholds(
                 image=img_thresh,
                 pixel=float(pixel_thresholds[category]),
-                source=f"adaptclip:calibrated:{shot_key}shot",
+                source=f"adaptclip:decision_parameters:{shot_key}shot",
             )
         if heatmap is not None:
             return adaptive_thresholds(

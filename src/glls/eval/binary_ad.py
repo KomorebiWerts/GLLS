@@ -262,6 +262,13 @@ def run_binary_ad_evaluation(
             localizer=localizer_name,
             shot=threshold_shot if threshold_shot is not None else calibration_shots,
         )
+        if threshold_policy == "table" and table_threshold is None:
+            raise ValueError(
+                "Missing binary AD threshold for "
+                f"dataset={dataset} category={category_name} localizer={localizer_name or '<any>'} "
+                f"shot={threshold_shot if threshold_shot is not None else calibration_shots}; "
+                "add it to AdaptCLIP model_config.json or pass --threshold_table with an explicit table."
+            )
         calibration = calibrate_threshold(
             train_scores,
             normal_quantile=normal_quantile,
@@ -543,7 +550,9 @@ def aggregate_binary_ad_summaries(
 
 def load_binary_ad_threshold_table(path: Path | str | None) -> dict[str, Any]:
     if not path:
-        return {}
+        from glls.models.adaptclip_config import load_adaptclip_binary_ad_decision_table
+
+        return load_adaptclip_binary_ad_decision_table()
     threshold_path = Path(path).expanduser()
     if not threshold_path.exists():
         return {}
