@@ -961,7 +961,7 @@ class GlobalSystem:
                 self.args = Args()
                 self.args.dataset = dataset_name 
                 self.args.dataset_root = self.data_manager._resolve_dataset_root()
-                self.args.image_size = 518
+                self.args.image_size = int(weight_config["image_size"])
                 self.args.checkpoint_path = resolved_ckpt_path
                 self.args.save_path = resolved_save_path
                 self.args.k_shot = k_shot

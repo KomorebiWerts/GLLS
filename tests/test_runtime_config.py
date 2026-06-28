@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from glls.runtime_config import (
     default_adaptclip_checkpoint,
@@ -53,6 +54,11 @@ class RuntimeConfigTest(unittest.TestCase):
         self.assertTrue(default_adaptclip_checkpoint("visa", "/models/AdaptCLIP").endswith("/checkpoints/visa_epoch_15.pth"))
         self.assertTrue(default_adaptclip_checkpoint("mvtec", "/models/AdaptCLIP").endswith("/checkpoints/mvtec_epoch_15.pth"))
         self.assertTrue(default_adaptclip_checkpoint("mpdd", "/models/AdaptCLIP").endswith("/checkpoints/mvtec_epoch_15.pth"))
+
+    def test_frontend_uses_shared_runtime_image_size(self):
+        source = Path("src/glls/cli/visualize.py").read_text(encoding="utf-8")
+        self.assertIn('self.args.image_size = int(weight_config["image_size"])', source)
+        self.assertNotIn("self.args.image_size = 518", source)
 
 
 if __name__ == "__main__":
