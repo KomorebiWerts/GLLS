@@ -63,7 +63,7 @@ workspace is `~/data/GLLS`; change it once in `scripts/dev/local_paths.sh` if
 your datasets or checkpoints live elsewhere.
 
 ```bash
-git clone https://github.com/KomorebiWerts/GLLS.git
+git clone <repository-url>
 cd GLLS
 
 mkdir -p ~/data/GLLS/envs
@@ -102,7 +102,7 @@ mkdir -p "$GLLS_ADAPTCLIP_ROOT/checkpoints"
 #   $GLLS_ADAPTCLIP_ROOT/checkpoints/visa_epoch_15.pth
 
 # ABounD 1-shot artifact for the published MVTec/VisA path.
-hf download komorebi01/glls-abound-1shot \
+hf download <abound-artifact-repo> \
   --local-dir "$GLLS_ABOUND_SAVE_PATH"
 ```
 
@@ -206,7 +206,7 @@ Recommended model resources:
 | CLIP backbone | [openai/clip-vit-large-patch14-336](https://huggingface.co/openai/clip-vit-large-patch14-336) or OpenCLIP-compatible ViT-L/14@336px weights | downloaded/cached by localizer |
 | AdaptCLIP | [gaobb/AdaptCLIP](https://github.com/gaobb/AdaptCLIP) adapter checkpoints | `GLLS_ADAPTCLIP_ROOT/checkpoints/<domain>_epoch_15.pth` |
 | Text embedding | [BAAI/bge-base-en-v1.5](https://huggingface.co/BAAI/bge-base-en-v1.5) | `GLLS_EMBEDDING_MODEL_PATH` |
-| ABounD 1-shot | [komorebi01/glls-abound-1shot](https://huggingface.co/komorebi01/glls-abound-1shot), including `model_config.json` | `GLLS_ABOUND_MODEL_PATH` / `GLLS_ABOUND_SAVE_PATH` |
+| ABounD 1-shot | Private/local artifact repository, including `model_config.json` | `GLLS_ABOUND_MODEL_PATH` / `GLLS_ABOUND_SAVE_PATH` |
 
 The published localizer route is shared by the batch CLI and frontend:
 
@@ -348,13 +348,13 @@ python scripts/eval/run_binary_ad_qwen3_sweep.py \
   --shot 0 \
   --output_root outputs/binary_ad/qwen3_full_0shot \
   --gpus 0,2,3 \
-  --model_path /home/dataset_model/model/qwen3-vl-8B
+  --model_path "$GLLS_VLM_MODEL_PATH"
 
 python scripts/eval/run_binary_ad_qwen3_sweep.py \
   --shot 1 \
   --output_root outputs/binary_ad/qwen3_full_1shot \
   --gpus 0,2,3 \
-  --model_path /home/dataset_model/model/qwen3-vl-8B
+  --model_path "$GLLS_VLM_MODEL_PATH"
 ```
 
 or:

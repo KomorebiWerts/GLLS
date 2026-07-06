@@ -21,7 +21,7 @@ def main() -> None:
     parser.add_argument("--output_root", required=True)
     parser.add_argument("--threshold_table", default="")
     parser.add_argument("--gpus", default="0", help="Comma-separated physical GPU ids.")
-    parser.add_argument("--model_path", default="/home/dataset_model/model/qwen3-vl-8B")
+    parser.add_argument("--model_path", default=glls_paths.vlm_model_path())
     parser.add_argument("--model_type", default="qwen3")
     parser.add_argument("--max_refs", type=int, default=4)
     parser.add_argument("--max_crops", type=int, default=3)

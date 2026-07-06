@@ -56,7 +56,7 @@ EOF
     args+=(--reuse_offline_assets)
   fi
   if [[ "${joined}" != *" --final_verifier "* ]]; then
-    qwen3_path="${GLLS_QWEN3_VL_MODEL_PATH:-/home/dataset_model/model/qwen3-vl-8B}"
+    qwen3_path="${GLLS_QWEN3_VL_MODEL_PATH:-${GLLS_VLM_MODEL_PATH}}"
     if [[ ! -d "${qwen3_path}" ]]; then
       cat >&2 <<EOF
 Missing Qwen3-VL model directory: ${qwen3_path}

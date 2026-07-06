@@ -31,9 +31,6 @@ env/
 !/docs/assets/
 !/docs/assets/**
 /tests
-!/tests/
-!/tests/**/*.py
-/tests/**/__pycache__/
 
 # Experiment outputs and logs
 experiments/
