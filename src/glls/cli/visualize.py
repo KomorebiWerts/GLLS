@@ -1,14 +1,12 @@
 import gradio as gr
 import torch
 import os
-import sys
 import asyncio
 import numpy as np
 import math
 import cv2
 import socket
 import json
-import shutil
 import tempfile
 import base64
 import zipfile
@@ -17,10 +15,16 @@ import html
 import pickle
 from datetime import datetime
 from io import BytesIO
-from collections import defaultdict
 from PIL import Image
 
 from glls import paths as glls_paths
+from glls.gradio_compat import patch_gradio_compat
+from glls.weld.frontend import (
+    WELD_CATEGORY,
+    WELD_DATASET,
+    WELD_TASK_PREFIX,
+    WeldFrontendRuntime,
+)
 from glls.runtime_config import (
     abound_dataset_weight_paths,
     default_adaptclip_checkpoint,
@@ -34,9 +38,8 @@ from glls.runtime_config import (
 )
 
 from transformers import (
-    AutoProcessor, 
-    AutoModelForCausalLM, 
-    Qwen2_5_VLForConditionalGeneration, 
+    AutoProcessor,
+    Qwen2_5_VLForConditionalGeneration,
     LlavaOnevisionForConditionalGeneration
 )
 
@@ -67,6 +70,31 @@ def _resolve_adaptclip_checkpoint(path_value, dataset_name):
 
 
 DEFAULT_ADAPTCLIP_CHECKPOINT_PATH = _default_adaptclip_checkpoint("mvtec")
+
+
+def _default_gpu_id():
+    configured = os.environ.get("GLLS_DEFAULT_GPU") or os.environ.get("GLLS_GPU_ID")
+    if configured:
+        return configured.split(",")[0].strip()
+    return "0"
+
+
+def _gpu_choices():
+    try:
+        if torch.cuda.is_available():
+            count = torch.cuda.device_count()
+            if count > 0:
+                return [str(i) for i in range(count)]
+    except Exception:
+        pass
+    return [str(i) for i in range(8)]
+
+
+def _normalize_gpu_id(gpu_id):
+    gpu_text = str(gpu_id).strip()
+    if not gpu_text:
+        return 0
+    return int(gpu_text)
 
 
 def _normalize_dataset_name(dataset_name):
@@ -206,6 +234,17 @@ def _pil_from_any(image_like):
     return None
 
 
+def _image_data_uri(image_like, max_px=900):
+    image = _pil_from_any(image_like)
+    if image is None:
+        return ""
+    image = image.convert("RGB").copy()
+    image.thumbnail((int(max_px), int(max_px)))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=86)
+    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
 
 
@@ -262,42 +301,6 @@ def _zip_write_path(zf, src_path, arcname):
         return True
     except Exception:
         return False
-
-def patch_starlette_template_response_compat():
-    """Keep Gradio 4.44 working with newer Starlette TemplateResponse signatures."""
-    try:
-        import inspect
-        from starlette.templating import Jinja2Templates
-    except Exception:
-        return
-
-    current = getattr(Jinja2Templates, "TemplateResponse", None)
-    if getattr(current, "_glls_compat_patched", False):
-        return
-    try:
-        params = list(inspect.signature(current).parameters)
-    except (TypeError, ValueError):
-        return
-    if len(params) < 3 or params[1] != "request":
-        return
-
-    original = current
-
-    def compat_template_response(self, *args, **kwargs):
-        if args and isinstance(args[0], str):
-            name = args[0]
-            context = args[1] if len(args) > 1 else kwargs.pop("context", None)
-            remaining = args[2:]
-            if context is None:
-                context = {}
-            request = kwargs.pop("request", None)
-            if request is None and isinstance(context, dict):
-                request = context.get("request")
-            return original(self, request, name, context, *remaining, **kwargs)
-        return original(self, *args, **kwargs)
-
-    compat_template_response._glls_compat_patched = True
-    Jinja2Templates.TemplateResponse = compat_template_response
 
 def _normalize_gallery_items(gallery_value):
     if not gallery_value:
@@ -689,7 +692,7 @@ class DatasetManager:
                 if isinstance(opts, str):
                     try:
                         opts = json.loads(opts)
-                    except:
+                    except (TypeError, json.JSONDecodeError):
                         opts = {}
                 return img, s['question'], s['task_type'], s.get('gt_answer', 'Unknown'), opts
         return None, "", "", "", {}
@@ -887,6 +890,20 @@ class GlobalSystem:
         self.current_k_shot = None
         self.current_runtime_signature = None
         self.current_weight_config = None
+        self.current_gpu_id = None
+        self.current_device = None
+        self.weld_runtime = WeldFrontendRuntime()
+
+    def _release_standard_components(self):
+        for attr in ("vlm", "localizer", "sam_engine"):
+            setattr(self, attr, None)
+        self.rag_agent = None
+        self.args = None
+        self.data_manager = None
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def initialize(
         self,
@@ -912,26 +929,68 @@ class GlobalSystem:
             resolved_ckpt_path = weight_config["checkpoint_path"]
             resolved_save_path = weight_config["save_path"]
             localizer_reload_key = weight_config["signature"]
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            if dataset_name == WELD_DATASET:
+                self._release_standard_components()
+                self.is_initialized = False
+                status = self.weld_runtime.initialize(gpu_id, resolved_ckpt_path, sam_path)
+                self.is_initialized = True
+                self.current_dataset = WELD_DATASET
+                self.current_ckpt = localizer_reload_key
+                self.current_localizer = "adaptclip"
+                self.current_k_shot = 1
+                self.current_runtime_signature = localizer_reload_key
+                self.current_weight_config = weight_config
+                self.current_gpu_id = _normalize_gpu_id(gpu_id)
+                self.current_device = self.weld_runtime.device
+                return status
+            if self.current_dataset == WELD_DATASET:
+                self.weld_runtime.clear()
+                self.is_initialized = False
+                self.current_dataset = None
+                self.current_runtime_signature = None
+            gpu_index = _normalize_gpu_id(gpu_id)
+            if torch.cuda.is_available():
+                cuda_count = torch.cuda.device_count()
+                if gpu_index < 0 or gpu_index >= cuda_count:
+                    raise ValueError(f"GPU {gpu_index} is not visible; PyTorch sees {cuda_count} CUDA device(s).")
+                torch.cuda.set_device(gpu_index)
+                device = f"cuda:{gpu_index}"
+            else:
+                device = "cpu"
+            gpu_changed = self.current_gpu_id is not None and self.current_gpu_id != gpu_index
             
             print(
                 "System Config: "
-                f"physical_gpu={gpu_id} | logical_device={device} | dataset={dataset_name} | "
+                f"physical_gpu={gpu_index} | logical_device={device} | dataset={dataset_name} | "
                 f"localizer={localizer_name} | k_shot={k_shot}"
             )
+
+            if gpu_changed:
+                print(f"GPU changed from {self.current_gpu_id} to {gpu_index}; reloading GPU-bound runtime components.")
+                for attr in ("vlm", "localizer", "sam_engine"):
+                    component = getattr(self, attr)
+                    if component is not None:
+                        del component
+                        setattr(self, attr, None)
+                self.args = None
+                self.is_initialized = False
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             # Initialize DatasetManager with the raw path; it handles resolution internally
             self.data_manager = DatasetManager(dataset_root, qa_root, dataset_name)
             
             # Re-init VLM if params changed
-            if self.vlm is None or self.vlm.model_type != model_type or self.vlm.model_path != model_path or self.vlm.use_vllm != use_vllm:
+            if gpu_changed or self.vlm is None or self.vlm.model_type != model_type or self.vlm.model_path != model_path or self.vlm.use_vllm != use_vllm:
                 if self.vlm: 
                     print("Reloading VLM and freeing memory.")
                     del self.vlm
                     import gc
                     gc.collect()
-                    torch.cuda.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                 
                 self.vlm = UnifiedVLMInference(
                     model_path, 
@@ -944,6 +1003,7 @@ class GlobalSystem:
             # Check if Localizer needs reload
             localizer_needs_reload = (
                 self.localizer is None or 
+                gpu_changed or
                 self.current_dataset != dataset_name or 
                 self.current_localizer != localizer_name or
                 self.current_ckpt != localizer_reload_key
@@ -955,9 +1015,12 @@ class GlobalSystem:
                     del self.localizer
                     import gc
                     gc.collect()
-                    torch.cuda.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
-                class Args: pass
+                class Args:
+                    pass
+
                 self.args = Args()
                 self.args.dataset = dataset_name 
                 self.args.dataset_root = self.data_manager._resolve_dataset_root()
@@ -970,8 +1033,13 @@ class GlobalSystem:
                 # Default params
                 self.args.features_list = [6, 12, 18, 24]
                 self.args.num_visual_finetune_layers = 12
-                self.args.depth = 7; self.args.n_ctx = 11; self.args.spe = 4
-                self.args.w0 = 0.15; self.args.w1 = 0.35; self.args.w2 = 0.35; self.args.w3 = 0.15
+                self.args.depth = 7
+                self.args.n_ctx = 11
+                self.args.spe = 4
+                self.args.w0 = 0.15
+                self.args.w1 = 0.35
+                self.args.w2 = 0.35
+                self.args.w3 = 0.15
                 
                 if localizer_name == "abound":
                     self.localizer = ABounD_Localizer(self.args, device=device)
@@ -994,6 +1062,8 @@ class GlobalSystem:
             self.current_k_shot = k_shot
             self.current_runtime_signature = localizer_reload_key
             self.current_weight_config = weight_config
+            self.current_gpu_id = gpu_index
+            self.current_device = device
 
             if not self.rag_agent:
                 self.rag_agent = SimInspecAgent(None, graph_root, k_shot=1)
@@ -1008,21 +1078,37 @@ class GlobalSystem:
             localizer_label = "ABounD" if localizer_name == "abound" else "AdaptCLIP"
             weight_note = os.path.basename(weight_config["dataset_weight_paths"].get("memory_bank", resolved_ckpt_path))
             return (
-                f"System ready | GPU:{gpu_id} | Model:{model_type} | vLLM:{vllm_status} | "
+                f"System ready | GPU:{gpu_index} | Model:{model_type} | vLLM:{vllm_status} | "
                 f"Dataset:{dataset_name} | Localizer:{localizer_label} {shot_mode} | Weights:{weight_note} | QA:curated"
             )
         except Exception as e:
+            if str(dataset_name or "").lower() == WELD_DATASET:
+                self.weld_runtime.clear()
+                self.is_initialized = False
             import traceback
             traceback.print_exc()
             return f"Init failed: {str(e)}"
 
-    def runtime_match_status(self, dataset_name, localizer_choice, k_shot, ckpt_path):
+    def runtime_match_status(self, dataset_name, localizer_choice, k_shot, ckpt_path, gpu_id=None):
         try:
             expected = _runtime_weight_config(dataset_name, localizer_choice, k_shot, ckpt_path)
         except Exception as e:
             return False, None, str(e)
         if not self.is_initialized:
             return False, expected, "Runtime is not initialized for the selected method configuration."
+        if gpu_id is not None:
+            try:
+                expected_gpu = _normalize_gpu_id(gpu_id)
+            except Exception as e:
+                return False, expected, f"Invalid GPU selection: {e}"
+            if self.current_gpu_id != expected_gpu:
+                loaded_gpu = "none" if self.current_gpu_id is None else str(self.current_gpu_id)
+                return (
+                    False,
+                    expected,
+                    f"Runtime is loaded on GPU {loaded_gpu}, but the selected GPU is {expected_gpu}. "
+                    "Click Initialize runtime before running GLLS.",
+                )
         if self.current_runtime_signature != expected["signature"]:
             loaded = _runtime_weight_summary(self.current_weight_config) if self.current_weight_config else "No runtime loaded."
             expected_text = _runtime_weight_summary(expected)
@@ -1208,7 +1294,22 @@ def _mini_list_html(items, empty_text, limit=5):
         rows = [f"<li>{_html(empty_text)}</li>"]
     return "<ul>" + "".join(rows) + "</ul>"
 
-def load_pvla_graph_summary(category):
+def _load_pickle_on_cpu(path):
+    class _CPUUnpickler(pickle.Unpickler):
+        def find_class(self, module, name):
+            if module == "torch.storage" and name == "_load_from_bytes":
+                return lambda payload: torch.load(
+                    BytesIO(payload),
+                    map_location="cpu",
+                    weights_only=False,
+                )
+            return super().find_class(module, name)
+
+    with open(path, "rb") as handle:
+        return _CPUUnpickler(handle).load()
+
+
+def load_pvla_graph_summary(category, graph_path=None):
     category = _as_text(category).strip()
     summary = {
         "category": category or "selected category",
@@ -1226,15 +1327,14 @@ def load_pvla_graph_summary(category):
     if not category:
         return summary
 
-    graph_path = os.path.join(DEFAULT_GRAPH_ROOT, f"{category}_graph.pkl")
+    graph_path = str(graph_path or os.path.join(DEFAULT_GRAPH_ROOT, f"{category}_graph.pkl"))
     summary["path"] = graph_path
     if not os.path.exists(graph_path):
         summary["status"] = "graph cache not found"
         return summary
 
     try:
-        with open(graph_path, "rb") as f:
-            payload = pickle.load(f)
+        payload = _load_pickle_on_cpu(graph_path)
         graph = payload.get("graph") if isinstance(payload, dict) else payload
         metadata = payload.get("source_metadata", {}) if isinstance(payload, dict) else {}
         node_names = payload.get("node_names", []) if isinstance(payload, dict) else []
@@ -1659,8 +1759,8 @@ def _atlas_detail_html(atlas, rag_blocks, regions, source, dataset, graph_source
         "</div></details>"
     )
 
-def _atlas_panel_html(category, rag_blocks=None):
-    atlas = load_pvla_graph_summary(category)
+def _atlas_panel_html(category, rag_blocks=None, graph_path=None):
+    atlas = load_pvla_graph_summary(category, graph_path=graph_path)
     rag_blocks = rag_blocks or []
     regions = []
     graph_sources = []
@@ -1709,6 +1809,229 @@ def render_dual_stream_placeholder(category=None):
         + '<section class="stream-panel fusion-panel"><div class="stream-heading"><p class="eyebrow">fusion</p><h3>Cross-stream evidence handoff</h3><p>Only selected global, local, and PVLA evidence is passed to the Phase-2 verifier.</p></div></section>'
         + '<section class="stream-panel verdict-panel"><div class="stream-heading"><p class="eyebrow">verdict</p><h3>Final answer</h3><p>The constrained multiple-choice result and evidence badges appear here after a run.</p></div></section>'
         '</div></div>'
+    )
+
+
+def _weld_reference_panel_html(result=None):
+    result = result or {}
+    try:
+        manifest = global_sys.weld_runtime.manifest
+        counts = manifest.get("counts") or {}
+        references = global_sys.weld_runtime.normal_reference_paths()
+        graph_path = global_sys.weld_runtime.root / "assets" / "graph" / "gear_weld_graph.pkl"
+    except Exception:
+        counts = {}
+        references = []
+        graph_path = ""
+    pvla = result.get("pvla") or {}
+    reference_count = int(pvla.get("reference_count", 0) or 0)
+    similarity = pvla.get("normal_similarity")
+    hotspot_xy = pvla.get("hotspot_xy") or []
+    best_reference = (pvla.get("best_reference") or {}).get("source_path")
+    reference_card = '<p class="atlas-crop-empty">Build weld assets to show the trusted normal reference.</p>'
+    displayed_reference = best_reference or (references[-1] if references else "")
+    if displayed_reference:
+        uri = _pvla_thumb_data_uri(displayed_reference, max_px=260)
+        if uri:
+            reference_card = (
+                '<figure class="weld-reference-card">'
+                f'<img src="{uri}" alt="Trusted normal gear-weld reference" />'
+                '<figcaption>Retrieved from PDF page 4 trusted-normal atlas</figcaption></figure>'
+            )
+    return (
+        _atlas_panel_html(WELD_CATEGORY, graph_path=graph_path)
+        + '<section class="stream-panel pvla-recall-panel">'
+        '<div class="stream-heading"><div><p class="eyebrow">online PVLA recall</p>'
+        '<h3>Graph recall → trusted-normal visual comparison</h3>'
+        '<p>The offline region/defect graph selects the relevant normal atlas before the online hotspot is compared.</p>'
+        '</div></div><div class="chip-row">'
+        + _chip_html("normal shots", 1, "pvla")
+        + _chip_html("PVLA patches", reference_count or "after init", "pvla")
+        + _chip_html("review images", int(counts.get("annotated_images", 0)) + int(counts.get("raw_unlabeled_images", 0)), "pvla")
+        + _chip_html("normal similarity", f"{float(similarity):.4f}" if similarity is not None else "after run", "pvla")
+        + _chip_html("hotspot xy", ", ".join(map(str, hotspot_xy)) if hotspot_xy else "after run", "pvla")
+        + '</div><div class="paired-grid"><div class="graph-mini"><strong>Evidence handoff</strong><ul>'
+        '<li>Offline: PDF-backed regions, defect nodes, distinctions, and graph edges.</li>'
+        '<li>Online: tiled hotspot is embedded and compared with retrieved normal patches.</li>'
+        '<li>Decision: compact hotspot uses the fixed operating point; PVLA similarity remains explicit supporting evidence.</li>'
+        '</ul></div><div>'
+        + reference_card
+        + '</div></div></section>'
+    )
+
+
+def render_weld_placeholder():
+    return (
+        '<div class="dual-board-html">'
+        '<div class="board-head"><div><p class="eyebrow">one-category method demo</p>'
+        '<h2>GLLS gear-weld inspection is ready</h2>'
+        '<p>Select one weld review image, initialize AdaptCLIP/PVLA/SAM3, then run the same dual-stream evidence board.</p>'
+        '</div><span class="process-badge">Method walkthrough · not a benchmark</span></div>'
+        '<div class="board-grid">'
+        + _weld_reference_panel_html()
+        + '<section class="stream-panel global-panel"><div class="stream-heading"><p class="eyebrow">stream 1</p><h3>Global weld logic</h3><p>SAM3-assisted geometry checks inspect ring or visible-arc continuity before local scoring.</p></div></section>'
+        + '<section class="stream-panel action-panel"><div class="stream-heading"><p class="eyebrow">stream 2</p><h3>Tiled local anomaly evidence</h3><p>High-resolution overlapping AdaptCLIP tiles preserve compact weld defects; no MCTS claim is made on this route.</p></div></section>'
+        + '<section class="stream-panel fusion-panel"><div class="stream-heading"><p class="eyebrow">fusion</p><h3>Conservative OR gate</h3><p>A global structural trigger or a fixed-threshold compact hotspot is sufficient for an NG review verdict.</p></div></section>'
+        + '<section class="stream-panel verdict-panel"><div class="stream-heading"><p class="eyebrow">verdict</p><h3>Prediction / reference comparison</h3><p>dx is an annotated anomaly; ljtq is an allowed station-2 connection context. Unlabelled images remain unscored.</p></div></section>'
+        '</div></div>'
+    )
+
+
+def render_weld_running():
+    return (
+        '<div class="dual-board-html weld-running-board">'
+        '<div class="board-head"><div><p class="eyebrow">live method execution</p>'
+        '<h2>Running GLLS…</h2>'
+        '<p>The selected image is being processed now. High-resolution tiled inference usually takes tens of seconds.</p>'
+        '</div><span class="process-badge running-badge"><i></i>Processing</span></div>'
+        '<div class="run-progress-grid">'
+        '<div class="run-step active"><b>1</b><span><strong>SAM3 structure</strong><em>Segment weld geometry and audit global rules</em></span></div>'
+        '<div class="run-step active"><b>2</b><span><strong>AdaptCLIP tiles</strong><em>Scan overlapping 1600 px local windows</em></span></div>'
+        '<div class="run-step active"><b>3</b><span><strong>PVLA recall</strong><em>Compare hotspots with graph-retrieved normal patches</em></span></div>'
+        '<div class="run-step active"><b>4</b><span><strong>OR fusion</strong><em>Render prediction, reference, overlay, and crops</em></span></div>'
+        '</div><p class="run-wait-note">Please keep this tab open. The evidence board will replace this panel automatically when the run completes.</p>'
+        '</div>'
+    )
+
+
+def render_weld_trace(result):
+    result = result or {}
+    global_result = result.get("global") or {}
+    trace = result.get("trace") or {}
+    local_trace = trace.get("local_stream") or {}
+    rules = global_result.get("rules") or []
+    rule_items = [
+        f"<b>{_html(rule.get('name'))}</b>: <code>{_html(rule.get('status'))}</code> "
+        f"<span>({_html(rule.get('criterion'))})</span>"
+        for rule in rules
+    ]
+    compact = float(local_trace.get("compact_hotspot_score", 0.0) or 0.0)
+    similarity = float(local_trace.get("pvla_normal_similarity", 0.0) or 0.0)
+    orchestra = float(local_trace.get("orchestra_score", result.get("orchestra_score", 0.0)) or 0.0)
+    threshold = float(local_trace.get("alert_threshold", result.get("local_threshold", 0.0)) or 0.0)
+    verdict = str(result.get("verdict") or "WAIT")
+    reference = str(
+        trace.get("reference_ground_truth")
+        or trace.get("official_ground_truth")
+        or (result.get("reference") or {}).get("ground_truth")
+        or "UNKNOWN"
+    ).upper()
+    if reference in {"OK", "NG"}:
+        comparison = "MATCH" if verdict == reference else "MISS" if reference == "NG" else "FALSE ALARM"
+    else:
+        comparison = "UNSCORED"
+    sam_overlay_uri = _image_data_uri(global_result.get("overlay"), max_px=1000)
+    sam_overlay = (
+        '<figure class="weld-evidence-figure"><img src="'
+        + sam_overlay_uri
+        + '" alt="SAM3 weld structure overlay" /><figcaption>SAM3 mask + geometry prior + logic status</figcaption></figure>'
+        if sam_overlay_uri
+        else '<p class="atlas-crop-empty">No SAM3 structure overlay was recorded.</p>'
+    )
+    crop_cards = []
+    for index, item in enumerate(result.get("hotspot_gallery") or [], start=1):
+        image_like = item[0] if isinstance(item, (list, tuple)) and item else item
+        caption = item[1] if isinstance(item, (list, tuple)) and len(item) > 1 else f"Online crop {index}"
+        uri = _image_data_uri(image_like, max_px=620)
+        if uri:
+            crop_cards.append(
+                '<figure class="weld-evidence-figure"><img src="'
+                + uri
+                + f'" alt="Online anomaly crop {index}" /><figcaption>{_html(caption)}</figcaption></figure>'
+            )
+    online_crops = (
+        '<div class="weld-crop-grid">' + "".join(crop_cards) + "</div>"
+        if crop_cards
+        else '<p class="atlas-crop-empty">Online crops appear after the tiled detector runs.</p>'
+    )
+    annotation_uri = _image_data_uri(result.get("annotation_view"), max_px=1000)
+    annotation_figure = (
+        '<figure class="weld-evidence-figure"><img src="'
+        + annotation_uri
+        + '" alt="Reference annotation overlay" /><figcaption>Reference overlay: red dx anomaly / blue ljtq allowed context</figcaption></figure>'
+        if annotation_uri
+        else ""
+    )
+    global_panel = (
+        '<section class="stream-panel global-panel"><div class="stream-heading"><div>'
+        '<p class="eyebrow">stream 1</p><h3>SAM3 logic anomaly check</h3>'
+        '<p>The segmentation mask is constrained by the station geometry prior, then audited by explicit continuity and thickness rules.</p>'
+        '</div></div><div class="chip-row">'
+        + _chip_html("station", global_result.get("station", "unknown"), "global")
+        + _chip_html("mask", global_result.get("mask_source", "unknown"), "global")
+        + _chip_html("SAM3 score", f"{float(global_result.get('sam3_score') or 0.0):.4f}", "global")
+        + _chip_html("mask quality", f"{float(global_result.get('sam3_quality') or 0.0):.4f}", "global")
+        + _chip_html("structure", "reliable" if global_result.get("reliable_structure") else "insufficient", "global")
+        + _chip_html("logic", "NG" if result.get("global_logic_ng") else "pass", "global")
+        + '</div>'
+        + sam_overlay
+        + '<details open><summary>Structural rule audit</summary>'
+        + _item_list_html(rule_items, "No global rule result was recorded.")
+        + '</details></section>'
+    )
+    local_panel = (
+        '<section class="stream-panel action-panel"><div class="stream-heading"><div>'
+        '<p class="eyebrow">stream 2</p><h3>Tiled AdaptCLIP + PVLA</h3>'
+        '<p>The compact hotspot is the local decision score; PVLA reports graph-retrieved normal similarity alongside it without an uncalibrated suppression multiplier.</p>'
+        '</div></div><div class="chip-row">'
+        + _chip_html("compact hotspot", f"{compact:.4f}", "action")
+        + _chip_html("normal similarity", f"{similarity:.4f}", "pvla")
+        + _chip_html("local score", f"{orchestra:.4f}", "action")
+        + _chip_html("threshold", f"{threshold:.4f}", "action")
+        + '</div>'
+        + _item_list_html([
+            f"Local trigger: <code>{'NG' if result.get('local_ng') else 'pass'}</code>",
+            f"Top tiled regions: <code>{len((result.get('local') or {}).get('top_tiles', []) or [])}</code>",
+            "Operating point: <code>fixed compact-hotspot threshold from existing offline validation</code>",
+        ], "No local evidence was recorded.")
+        + '</section>'
+    )
+    crop_panel = (
+        '<section class="stream-panel online-crop-panel"><div class="stream-heading"><div>'
+        '<p class="eyebrow">online local evidence</p><h3>Online anomaly crops</h3>'
+        '<p>These crops are cut from the current image at runtime. Each caption records the hotspot center and compact response.</p>'
+        '</div></div>'
+        + online_crops
+        + '</section>'
+    )
+    fusion_panel = (
+        '<section class="stream-panel fusion-panel"><div class="stream-heading"><div>'
+        '<p class="eyebrow">fusion</p><h3>Global logic NG OR local AdaptCLIP NG</h3>'
+        '<p>The two streams remain inspectable and the fusion rule is explicit.</p>'
+        '</div></div><div class="chip-row">'
+        + _chip_html("global", "NG" if result.get("global_logic_ng") else "pass", "global")
+        + _chip_html("local", "NG" if result.get("local_ng") else "pass", "action")
+        + _chip_html("fusion", verdict, "")
+        + '</div></section>'
+    )
+    verdict_panel = (
+        '<section class="stream-panel verdict-panel"><div class="stream-heading"><div>'
+        '<p class="eyebrow">prediction vs reference</p><h3>Prediction '
+        + _html(verdict)
+        + ' / Ground truth '
+        + _html(reference)
+        + ' / '
+        + _html(comparison)
+        + '</h3><p>Station-2 mapping: <code>dx → NG defect</code>; <code>ljtq → OK allowed connection context</code>. '
+        'This reference is backed by the official inspection PDFs and archive polygons, but the archive still has no official benchmark split.</p>'
+        '</div></div>'
+        + annotation_figure
+        + '</section>'
+    )
+    return (
+        '<div class="dual-board-html"><div class="board-head"><div>'
+        '<p class="eyebrow">trace-backed weld demo</p><h2>Dual-stream gear-weld inspection</h2>'
+        '<p>The board below is rendered from the weld trace produced by this run.</p>'
+        '</div><span class="process-badge">Trace-backed · '
+        + _html(verdict)
+        + '</span></div><div class="board-grid">'
+        + _weld_reference_panel_html(result)
+        + global_panel
+        + local_panel
+        + crop_panel
+        + fusion_panel
+        + verdict_panel
+        + '</div></div>'
     )
 
 def _mcts_action_viz_html(mcts_search, action_trace, mcts_status):
@@ -1766,7 +2089,6 @@ def render_dual_stream_trace(debug_meta, final_prompt="", category=""):
     crop_audit = debug_meta.get("crop_evidence_audit", []) or []
     sam_attempts = debug_meta.get("sam_text_prompt_attempts", []) or []
     sam_prompt_audit = debug_meta.get("sam_prompt_selection_audit", []) or []
-    sam_hits = debug_meta.get("sam_text_prompt_hits", []) or []
     sam_scores = debug_meta.get("sam_mask_scores", []) or []
     rag_blocks = debug_meta.get("rag_block_provenance", []) or []
     rag_summary = participation.get("rag_source_backed_summary", {}) or {}
@@ -2075,7 +2397,8 @@ async def run_analysis_stream(image, question, subclass, task_type, options, gro
             
             if b.get('images'):
                 for img_path in b['images']:
-                    if os.path.exists(img_path): rag_file_paths.append(img_path)
+                    if os.path.exists(img_path):
+                        rag_file_paths.append(img_path)
     
     state = {"heatmap": None, "log": "Starting GLLS method trace."}
     if override_rag_text:
@@ -2099,8 +2422,10 @@ async def run_analysis_stream(image, question, subclass, task_type, options, gro
     yield rag_file_paths, rag_text_content, None, None, None, state["log"], "", "", None, None, None, "", _method_process_placeholder()
 
     async def callback(key, value):
-        if key == "heatmap": state["heatmap"] = value
-        if key == "log": state["log"] += f"\n{value}"
+        if key == "heatmap":
+            state["heatmap"] = value
+        if key == "log":
+            state["log"] += f"\n{value}"
 
     row = {'image': image.convert("RGB"), 'question': question, 'options': options, 'category': subclass, 'type': task_type}
     try:
@@ -2145,11 +2470,14 @@ async def run_analysis_stream(image, question, subclass, task_type, options, gro
         
         # Build Final Prompt
         final_content = []
-        if result.get("rag_content_list"): final_content.extend(result["rag_content_list"])
+        if result.get("rag_content_list"):
+            final_content.extend(result["rag_content_list"])
         if result.get("red_box_image"):
-            final_content.append({"type": "text", "text": "Image: Global Trace (Red Box)\n"}); final_content.append({"type": "image", "image": result["red_box_image"]})
+            final_content.append({"type": "text", "text": "Image: Global Trace (Red Box)\n"})
+            final_content.append({"type": "image", "image": result["red_box_image"]})
         for i, crop in enumerate(result.get("crop_images", [])):
-            final_content.append({"type": "text", "text": f"Image: Local Refinement {i+1}\n"}); final_content.append({"type": "image", "image": crop})
+            final_content.append({"type": "text", "text": f"Image: Local Refinement {i+1}\n"})
+            final_content.append({"type": "image", "image": crop})
         
         final_prompt = result.get("prompt")
         final_content.append({"type": "text", "text": final_prompt})
@@ -2220,6 +2548,132 @@ def _blocked_run_outputs(message):
     )
 
 
+def _weld_rule_markdown(result):
+    global_result = result.get("global") or {}
+    rows = [
+        f"| `{rule.get('name', 'rule')}` | {rule.get('criterion', '')} | **{rule.get('status', 'unknown')}** |"
+        for rule in global_result.get("rules") or []
+    ]
+    return "\n".join([
+        "### Stream 1 · Global weld logic",
+        "",
+        f"Mask source: `{global_result.get('mask_source', 'unknown')}`  ",
+        f"Station: `{global_result.get('station', 'unknown')}`  ",
+        f"SAM3 quality: `{float(global_result.get('sam3_quality', 0.0) or 0.0):.3f}`",
+        "",
+        "| Rule | Criterion | Status |",
+        "| --- | --- | --- |",
+        *(rows or ["| No rule result | — | — |"]),
+        "",
+        "Insufficient structural evidence remains non-triggering; it is not promoted to a confident NG.",
+    ])
+
+
+def _weld_final_markdown(result, question):
+    trace = result.get("trace") or {}
+    local = trace.get("local_stream") or {}
+    verdict = str(result.get("verdict") or "unknown")
+    reference = str(trace.get("reference_ground_truth") or "UNKNOWN").upper()
+    if reference in {"OK", "NG"}:
+        comparison = "MATCH" if verdict == reference else "MISS" if reference == "NG" else "FALSE ALARM"
+    else:
+        comparison = "UNSCORED"
+    reason = (
+        "global weld logic triggered"
+        if result.get("global_logic_ng")
+        else "local AdaptCLIP/PVLA score triggered"
+        if result.get("local_ng")
+        else "neither stream triggered"
+    )
+    return "\n".join([
+        "### Gear-weld inspection result",
+        "",
+        f"**Question:** {question}",
+        "",
+        f"> **{verdict}** — {reason}.",
+        "",
+        f"**Reference:** `{reference}` · **Comparison:** `{comparison}`",
+        "",
+        "| Global logic | Compact hotspot | PVLA normal similarity | Local score / threshold |",
+        "| --- | ---: | ---: | ---: |",
+        (
+            f"| {'NG' if result.get('global_logic_ng') else 'pass'} | "
+            f"{float(local.get('compact_hotspot_score', 0.0) or 0.0):.4f} | "
+            f"{float(local.get('pvla_normal_similarity', 0.0) or 0.0):.4f} | "
+            f"{float(local.get('orchestra_score', 0.0) or 0.0):.4f} / "
+            f"{float(local.get('alert_threshold', 0.0) or 0.0):.4f} |"
+        ),
+        "",
+        "**Reference contract:** `dx` is an anomalous defect region; `ljtq` is an allowed station-2 "
+        "connection context. The archive has no official benchmark split, so this UI does not claim aggregate accuracy.",
+    ])
+
+
+def _weld_result_outputs(result, question):
+    trace = result.get("trace") or {}
+    local = trace.get("local_stream") or {}
+    references = global_sys.weld_runtime.normal_reference_paths()
+    gallery = result.get("hotspot_gallery") or []
+    crop_paths = [str(item[0]) for item in gallery if isinstance(item, (list, tuple)) and item]
+    reference_text = "\n".join([
+        "GLLS gear-weld knowledge route",
+        "- Source rules: 焊缝缺陷检测升级.pdf",
+        "- Offline atlas: 14 graph nodes / 18 graph edges",
+        "- Visual prior: one trusted normal weld image and deterministic derivatives",
+        "- Global evidence: SAM3-assisted geometry and weld continuity rules",
+        "- Local evidence: overlapping high-resolution AdaptCLIP tiles",
+        "- Fusion: global_logic_ng OR local_adaptclip_ng",
+        "- Evaluation status: qualitative only; image-level GT unavailable",
+        f"- PVLA reference patches: {(result.get('pvla') or {}).get('reference_count', 0)}",
+    ])
+    fusion_record = "\n".join([
+        "GLLS weld fusion record",
+        f"sample={trace.get('sample_id', 'unknown')}",
+        f"global_logic_ng={bool(result.get('global_logic_ng'))}",
+        f"local_adaptclip_ng={bool(result.get('local_ng'))}",
+        f"local_score={float(local.get('orchestra_score', 0.0) or 0.0):.6f}",
+        f"threshold={float(local.get('alert_threshold', 0.0) or 0.0):.6f}",
+        f"verdict={result.get('verdict', 'unknown')}",
+    ])
+    return (
+        references,
+        reference_text,
+        result.get("heatmap_view"),
+        gallery,
+        crop_paths,
+        json.dumps(trace, ensure_ascii=False, indent=2),
+        _weld_final_markdown(result, question),
+        fusion_record,
+        result.get("annotation_view"),
+        crop_paths,
+        (result.get("global") or {}).get("overlay"),
+        _weld_rule_markdown(result),
+        render_weld_trace(result),
+    )
+
+
+def _weld_running_outputs():
+    try:
+        references = global_sys.weld_runtime.normal_reference_paths()
+    except Exception:
+        references = []
+    return (
+        references,
+        "Loading source-backed weld knowledge and running both evidence streams…",
+        None,
+        None,
+        None,
+        "Starting GLLS gear-weld inspection.",
+        "### Gear-weld inspection in progress",
+        "",
+        None,
+        None,
+        None,
+        "Running global weld logic…",
+        render_weld_running(),
+    )
+
+
 def search_runner_wrapper(
     img,
     q,
@@ -2231,6 +2685,7 @@ def search_runner_wrapper(
     localizer_choice="Auto",
     k_shot=1,
     ckpt_path=None,
+    gpu_id=None,
     man_txt=None,
     man_files=None,
 ):
@@ -2239,9 +2694,21 @@ def search_runner_wrapper(
         localizer_choice,
         k_shot,
         ckpt_path,
+        gpu_id,
     )
     if not runtime_ok:
         yield _blocked_run_outputs(runtime_message)
+        return
+
+    if str(dataset_name).lower() == WELD_DATASET:
+        yield _weld_running_outputs()
+        try:
+            result = global_sys.weld_runtime.inspect(task)
+            yield _weld_result_outputs(result, q)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield _blocked_run_outputs(f"Weld inspection failed: {e}")
         return
 
     # Verify opts before running
@@ -2249,12 +2716,16 @@ def search_runner_wrapper(
     if not opts:
         print("[WRAPPER] Options are None or invalid, resetting to empty dict.")
         
-    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     gen = run_analysis_stream(img, q, sub, task, opts, gt, man_txt, man_files)
     try:
-        while True: yield loop.run_until_complete(gen.__anext__())
-    except StopAsyncIteration: pass
-    finally: loop.close()
+        while True:
+            yield loop.run_until_complete(gen.__anext__())
+    except StopAsyncIteration:
+        pass
+    finally:
+        loop.close()
 
 # ==========================================
 # 6. Gradio UI
@@ -2262,29 +2733,31 @@ def search_runner_wrapper(
 
 CSS = """
 :root {
-    --canvas: #F5F7FB;
+    --canvas: #F1F5FA;
     --panel: #FFFFFF;
     --panel-raised: #FBFCFE;
-    --rule: #DCE2EA;
-    --ink: #1B2230;
-    --muted: #5A6675;
-    --signal: #3452C7;
-    --signal-hover: #2A43A8;
-    --signal-subtle: #EEF1FB;
+    --rule: #D8E1EC;
+    --ink: #142033;
+    --muted: #627087;
+    --signal: #315BE8;
+    --signal-hover: #2448C4;
+    --signal-subtle: #EDF2FF;
     --builder: #B0640F;
     --builder-subtle: #F8EFE4;
     --pass: #0F7A4D;
     --pass-subtle: #EAF6F0;
     --danger: #C0392B;
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 16px;
-    --shadow-sm: 0 1px 2px rgba(27, 34, 48, 0.05), 0 1px 3px rgba(27, 34, 48, 0.04);
-    --shadow-md: 0 4px 12px rgba(27, 34, 48, 0.08), 0 2px 4px rgba(27, 34, 48, 0.05);
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 20px;
+    --shadow-sm: 0 1px 2px rgba(20, 32, 51, 0.04), 0 8px 24px rgba(20, 32, 51, 0.045);
+    --shadow-md: 0 16px 38px rgba(20, 32, 51, 0.10), 0 2px 8px rgba(20, 32, 51, 0.05);
 }
 html, body, .gradio-container {
     background:
-        linear-gradient(90deg, rgba(220, 226, 234, 0.62) 1px, transparent 1px) 0 0 / 72px 72px,
+        radial-gradient(circle at 8% 5%, rgba(49, 91, 232, 0.075), transparent 28rem),
+        radial-gradient(circle at 92% 13%, rgba(15, 122, 77, 0.055), transparent 30rem),
+        linear-gradient(90deg, rgba(216, 225, 236, 0.46) 1px, transparent 1px) 0 0 / 88px 88px,
         var(--canvas) !important;
     color: var(--ink);
     font-family: Inter, "IBM Plex Sans", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
@@ -2293,16 +2766,21 @@ html, body, .gradio-container {
     max-width: none !important;
 }
 .gradio-container .contain {
-    max-width: 1560px !important;
+    width: 100% !important;
+    max-width: none !important;
+    padding-bottom: 36px;
 }
 .app-topbar {
     position: sticky;
     top: 0;
     z-index: 20;
     margin: -16px -16px 0;
-    padding: 14px 28px;
-    border-bottom: 1px solid var(--rule);
-    background: rgba(247, 248, 250, 0.94);
+    padding: 15px 28px;
+    border-bottom: 1px solid rgba(135, 161, 216, 0.25);
+    background:
+        linear-gradient(120deg, rgba(49, 91, 232, 0.20), transparent 42%),
+        linear-gradient(135deg, #111E33, #0C1728 72%, #10243C);
+    box-shadow: 0 12px 30px rgba(10, 23, 42, 0.14);
     backdrop-filter: blur(16px);
 }
 .brand-block {
@@ -2311,19 +2789,39 @@ html, body, .gradio-container {
     gap: 12px;
 }
 .brand-mark {
-    width: 13px;
-    min-height: 42px;
-    border-radius: 999px;
-    background: linear-gradient(var(--signal), var(--builder) 52%, var(--pass));
-    box-shadow: inset 0 0 0 1px rgba(31, 35, 40, 0.16);
+    position: relative;
+    width: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    border: 1px solid rgba(140, 169, 255, 0.50);
+    border-radius: 13px;
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: inset 0 0 0 7px rgba(49, 91, 232, 0.11), 0 0 22px rgba(49, 91, 232, 0.16);
+}
+.brand-mark::before,
+.brand-mark::after {
+    content: "";
+    position: absolute;
+    inset: 10px;
+    border: 3px solid #45D2D9;
+    border-radius: 50%;
+}
+.brand-mark::after {
+    inset: 17px;
+    border: 0;
+    background: #FFFFFF;
+    box-shadow: 0 0 9px rgba(69, 210, 217, 0.85);
 }
 .brand-copy strong {
     display: block;
     font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
-    font-size: 22px;
+    color: #FFFFFF;
+    font-size: 21px;
     line-height: 1.05;
 }
-.brand-copy small,
+.brand-copy small {
+    color: #B7C5DA;
+}
 .hero-copy,
 .section-copy,
 .muted-note {
@@ -2331,37 +2829,43 @@ html, body, .gradio-container {
 }
 .status-chip textarea,
 .status-chip input {
-    min-height: 36px !important;
-    border-radius: 999px !important;
-    border: 1px solid var(--rule) !important;
-    background: var(--panel) !important;
-    color: var(--ink) !important;
-    font-size: 0.86rem !important;
+    min-height: 40px !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(155, 177, 213, 0.32) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: #E6EDF8 !important;
+    font-family: "Cascadia Code", Consolas, monospace !important;
+    font-size: 0.78rem !important;
 }
 .hero-panel {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
     gap: 18px;
     align-items: end;
-    margin: 18px 0 14px;
-    padding: 18px 20px;
+    overflow: hidden;
+    margin: 20px 0 14px;
+    padding: 24px 26px;
     border: 1px solid var(--rule);
     border-radius: var(--radius-lg);
-    background: var(--panel);
+    background:
+        linear-gradient(105deg, rgba(49, 91, 232, 0.045), transparent 44%),
+        var(--panel);
     box-shadow: var(--shadow-sm);
 }
 .hero-panel h1 {
     margin: 4px 0 8px;
     color: var(--ink);
     font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
-    font-size: clamp(1.9rem, 3.4vw, 3.1rem);
-    line-height: 1.02;
-    letter-spacing: 0;
+    font-size: clamp(2rem, 3.4vw, 3.15rem);
+    line-height: 1;
+    letter-spacing: -0.025em;
 }
 .eyebrow {
-    color: var(--muted);
-    font-size: 0.78rem;
-    letter-spacing: 0;
+    color: var(--signal);
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.10em;
     text-transform: uppercase;
 }
 .hero-metrics {
@@ -2372,7 +2876,7 @@ html, body, .gradio-container {
     display: flex;
     justify-content: space-between;
     gap: 18px;
-    padding: 8px 12px;
+    padding: 9px 12px;
     border: 1px solid var(--rule);
     border-radius: var(--radius-md);
     background: var(--panel-raised);
@@ -2383,43 +2887,48 @@ html, body, .gradio-container {
 .custom-card {
     background: var(--panel);
     border-radius: var(--radius-lg);
-    padding: 18px;
+    padding: 20px;
     border: 1px solid var(--rule);
     box-shadow: var(--shadow-sm);
 }
 .custom-card.tight {
     padding: 14px;
 }
-.quick-start {
+.runtime-control-panel {
     position: sticky;
     top: 72px;
     z-index: 18;
-    align-items: stretch;
     margin: 12px 0 16px;
-    padding: 12px;
+    padding: 14px 18px 12px;
     border: 1px solid var(--rule);
     border-radius: var(--radius-lg);
-    background: rgba(255, 255, 255, 0.96);
+    background: rgba(255, 255, 255, 0.97);
     box-shadow: var(--shadow-md);
     backdrop-filter: blur(14px);
 }
-.quick-start-copy {
-    height: 100%;
-    padding: 8px 10px;
+.runtime-action-bar {
+    align-items: center;
+    gap: 12px;
 }
-.quick-start-copy h3 {
-    margin: 0 0 4px;
-    color: var(--ink);
-    font-family: Literata, "Source Serif 4", Georgia, "Microsoft YaHei", serif;
-    font-size: 1.16rem;
+.runtime-heading {
+    min-width: 300px;
 }
-.quick-start-copy p {
-    margin: 0;
-    color: var(--muted);
-    font-size: 0.9rem;
+.runtime-heading .section-title {
+    margin-bottom: 2px;
 }
-.quick-action button {
-    min-height: 58px !important;
+.runtime-heading .section-copy {
+    margin-bottom: 0;
+}
+.runtime-action button {
+    min-height: 48px !important;
+}
+.runtime-select-grid {
+    align-items: end;
+    gap: 12px;
+    margin-top: 6px;
+}
+.runtime-select-grid > div {
+    min-width: 160px;
 }
 .sample-actions button {
     min-height: 44px !important;
@@ -2427,12 +2936,13 @@ html, body, .gradio-container {
 }
 .demo-shell {
     align-items: flex-start;
+    gap: 14px;
 }
 .dual-board-card {
     background: var(--panel);
     border: 1px solid var(--rule);
     border-radius: var(--radius-lg);
-    padding: 18px;
+    padding: 20px;
     box-shadow: var(--shadow-sm);
 }
 .dual-board-html {
@@ -2460,6 +2970,78 @@ html, body, .gradio-container {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
+}
+.weld-running-board {
+    min-height: 390px;
+    padding: 8px 4px;
+}
+.running-badge {
+    border-color: #E6C38F;
+    background: #FFF7E8;
+    color: #9A5A12;
+}
+.running-badge i {
+    width: 12px;
+    height: 12px;
+    margin-right: 7px;
+    border: 2px solid rgba(154, 90, 18, 0.28);
+    border-top-color: #9A5A12;
+    border-radius: 50%;
+    animation: weld-spin 0.85s linear infinite;
+}
+.run-progress-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 10px;
+}
+.run-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-height: 96px;
+    padding: 14px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-md);
+    background: var(--panel-raised);
+}
+.run-step > b {
+    display: grid;
+    place-items: center;
+    flex: 0 0 30px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--signal-subtle);
+    color: var(--signal);
+}
+.run-step span,
+.run-step strong,
+.run-step em {
+    display: block;
+}
+.run-step strong {
+    color: var(--ink);
+    font-size: 0.94rem;
+}
+.run-step em {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-style: normal;
+    line-height: 1.4;
+}
+.run-wait-note {
+    margin-top: 14px !important;
+    padding: 10px 12px;
+    border-left: 4px solid var(--builder);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: var(--builder-subtle);
+    color: var(--ink) !important;
+    font-weight: 700;
+}
+@keyframes weld-spin {
+    to { transform: rotate(360deg); }
 }
 .stream-panel {
     border: 1px solid var(--rule);
@@ -2496,6 +3078,8 @@ html, body, .gradio-container {
     font-weight: 800;
 }
 .atlas-panel,
+.pvla-recall-panel,
+.online-crop-panel,
 .fusion-panel,
 .verdict-panel {
     grid-column: 1 / -1;
@@ -2508,6 +3092,12 @@ html, body, .gradio-container {
 }
 .atlas-panel {
     border-top: 4px solid var(--pass);
+}
+.pvla-recall-panel {
+    border-top: 4px solid #2F8A6A;
+}
+.online-crop-panel {
+    border-top: 4px solid var(--builder);
 }
 .fusion-panel {
     border-top: 4px solid #5A6675;
@@ -2586,6 +3176,34 @@ html, body, .gradio-container {
 .graph-mini li,
 .stream-panel li {
     margin: 5px 0;
+    overflow-wrap: anywhere;
+}
+.weld-crop-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+.weld-evidence-figure {
+    margin: 10px 0 0;
+    padding: 8px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-md);
+    background: var(--panel-raised);
+}
+.weld-evidence-figure img {
+    display: block;
+    width: 100%;
+    max-height: 420px;
+    object-fit: contain;
+    border-radius: calc(var(--radius-md) - 3px);
+    background: #0F1720;
+}
+.weld-evidence-figure figcaption {
+    margin-top: 7px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 750;
     overflow-wrap: anywhere;
 }
 .atlas-graph-wrap {
@@ -2937,15 +3555,18 @@ html, body, .gradio-container {
     font-size: 0.92rem;
 }
 .desk-btn-primary {
-    background: var(--signal) !important;
+    background: linear-gradient(135deg, var(--signal), #416EF3) !important;
     color: white !important;
     font-weight: 800 !important;
     border-radius: var(--radius-md) !important;
     border: 1px solid var(--signal-hover) !important;
-    box-shadow: 0 1px 2px rgba(52, 82, 199, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
+    box-shadow: 0 8px 20px rgba(49, 91, 232, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
+    transition: transform 0.18s ease, box-shadow 0.18s ease !important;
 }
 .desk-btn-primary:hover {
     background: var(--signal-hover) !important;
+    transform: translateY(-1px);
+    box-shadow: 0 11px 24px rgba(49, 91, 232, 0.28) !important;
 }
 .desk-btn-secondary {
     background: var(--panel) !important;
@@ -2956,6 +3577,14 @@ html, body, .gradio-container {
 }
 .gradio-container button {
     border-radius: var(--radius-md) !important;
+}
+.gradio-container button:focus-visible,
+.gradio-container input:focus-visible,
+.gradio-container textarea:focus-visible,
+.gradio-container select:focus-visible,
+.gradio-container summary:focus-visible {
+    outline: 3px solid rgba(49, 91, 232, 0.24) !important;
+    outline-offset: 2px;
 }
 .gradio-container input,
 .gradio-container textarea,
@@ -3166,11 +3795,16 @@ html, body, .gradio-container {
     .hero-panel {
         grid-template-columns: 1fr;
     }
-    .quick-start,
     .paired-grid,
     .atlas-detail-grid,
     .evidence-note,
     .board-grid {
+        grid-template-columns: 1fr;
+    }
+    .weld-crop-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .run-progress-grid {
         grid-template-columns: 1fr;
     }
     .method-kpi-grid,
@@ -3178,6 +3812,8 @@ html, body, .gradio-container {
         grid-template-columns: 1fr;
     }
     .atlas-panel,
+    .pvla-recall-panel,
+    .online-crop-panel,
     .fusion-panel,
     .verdict-panel {
         grid-column: auto;
@@ -3186,14 +3822,461 @@ html, body, .gradio-container {
     .method-stage.phase-final {
         grid-column: auto;
     }
+    .runtime-control-panel {
+        position: relative;
+        top: auto;
+    }
+    .runtime-heading {
+        min-width: 0;
+    }
+    .runtime-action-bar,
+    .runtime-select-grid {
+        flex-wrap: wrap;
+    }
+}
+@media (max-width: 900px) {
+    .demo-shell,
+    .evidence-pair {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+    .demo-shell > div,
+    .evidence-pair > div {
+        width: 100% !important;
+        min-width: 0 !important;
+        flex: 1 1 100% !important;
+    }
+}
+@media (max-width: 720px) {
+    .weld-crop-grid {
+        grid-template-columns: 1fr;
+    }
+    .gradio-container .contain {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+    .app-topbar {
+        position: relative;
+        flex-direction: column !important;
+        gap: 10px;
+        margin: -16px -10px 0;
+        padding: 14px 16px;
+    }
+    .app-topbar > div,
+    .demo-shell > div,
+    .evidence-pair > div {
+        width: 100% !important;
+        min-width: 0 !important;
+        flex: 1 1 100% !important;
+    }
+    .brand-mark {
+        width: 36px;
+        min-width: 36px;
+        min-height: 36px;
+    }
+    .brand-mark::before { inset: 9px; }
+    .brand-mark::after { inset: 15px; }
+    .brand-copy strong {
+        font-size: 1.05rem;
+    }
+    .brand-copy small {
+        display: none;
+    }
+    .status-chip textarea,
+    .status-chip input {
+        min-height: 36px !important;
+    }
+    .hero-panel {
+        margin-top: 12px;
+        padding: 17px;
+    }
+    .hero-panel h1 {
+        font-size: 1.85rem;
+    }
+    .hero-copy {
+        font-size: 0.86rem;
+    }
+    .runtime-control-panel,
+    .custom-card,
+    .dual-board-card {
+        padding: 14px;
+        border-radius: var(--radius-md);
+    }
+    .runtime-action-bar,
+    .demo-shell,
+    .evidence-pair {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+    .runtime-select-grid > div {
+        min-width: 135px;
+    }
+    .board-head,
+    .process-head {
+        display: block;
+    }
+    .process-badge {
+        margin-top: 10px;
+    }
+    .method-kpi-grid,
+    .method-stage-grid {
+        grid-template-columns: 1fr;
+    }
+    .prompt-card {
+        min-height: 260px !important;
+        max-height: 340px !important;
+    }
+    .logic-view-img,
+    .evidence-image {
+        height: 290px !important;
+        min-height: 290px !important;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
+
+/* Compact research-workspace pass: the controls remain visible without competing
+   with the evidence board, and Gradio's generated rows become real responsive grids. */
+:root {
+    --canvas: #F4F7F7;
+    --panel: #FFFFFF;
+    --panel-raised: #F8FBFB;
+    --rule: #D9E3E4;
+    --ink: #17242D;
+    --muted: #66757C;
+    --signal: #176F86;
+    --signal-hover: #0D5C6F;
+    --signal-subtle: #E7F2F4;
+    --builder: #A96722;
+    --builder-subtle: #F8F0E7;
+    --pass: #19745A;
+    --pass-subtle: #E9F5EF;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 10px;
+    --shadow-sm: 0 1px 2px rgba(23, 36, 45, 0.04);
+    --shadow-md: 0 8px 20px rgba(23, 36, 45, 0.07);
+}
+html, body, .gradio-container {
+    background:
+        linear-gradient(90deg, rgba(207, 220, 220, 0.46) 1px, transparent 1px) 0 0 / 96px 96px,
+        linear-gradient(0deg, rgba(207, 220, 220, 0.28) 1px, transparent 1px) 0 0 / 96px 96px,
+        var(--canvas) !important;
+}
+.gradio-container .contain {
+    width: 100% !important;
+    max-width: none !important;
+    padding-bottom: 28px;
+}
+.app-topbar {
+    position: relative;
+    z-index: 1;
+    margin: -16px -16px 0;
+    padding: 12px 24px;
+    border-bottom: 1px solid #203F4B;
+    background: #17303E;
+    box-shadow: none;
+    backdrop-filter: none;
+}
+.brand-block {
+    gap: 10px;
+}
+.brand-mark {
+    width: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    border-radius: 8px;
+    border-color: rgba(150, 220, 217, 0.48);
+    box-shadow: none;
+}
+.brand-mark::before { inset: 8px; }
+.brand-mark::after { inset: 14px; }
+.brand-copy strong {
+    font-family: Inter, "IBM Plex Sans", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+    font-size: 1rem;
+    font-weight: 800;
+}
+.brand-copy small {
+    font-size: 0.75rem;
+    color: #B8CBD0;
+}
+.status-chip textarea,
+.status-chip input {
+    min-height: 34px !important;
+    border-radius: var(--radius-sm) !important;
+    border-color: rgba(184, 220, 220, 0.32) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: none !important;
+    font-size: 0.72rem !important;
+    line-height: 1.25 !important;
+    resize: none !important;
+}
+.hero-panel {
+    margin: 16px 0 12px;
+    padding: 18px 20px;
+    border-radius: var(--radius-md);
+    border-color: var(--rule);
+    border-left: 4px solid var(--signal);
+    background: var(--panel);
+    box-shadow: none;
+}
+.hero-panel h1 {
+    font-size: clamp(1.9rem, 3vw, 2.55rem);
+    line-height: 1.06;
+    letter-spacing: 0;
+}
+.eyebrow {
+    color: var(--signal);
+    font-size: 0.72rem;
+    letter-spacing: 0;
+}
+.hero-copy {
+    max-width: 760px;
+    margin-bottom: 0;
+}
+.hero-metrics {
+    gap: 6px;
+}
+.hero-metrics span {
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+}
+.runtime-control-panel {
+    position: relative;
+    top: auto;
+    z-index: 1;
+    margin: 12px 0 16px;
+    padding: 16px 18px;
+    border-radius: var(--radius-md);
+    border-color: var(--rule);
+    background: var(--panel);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: none;
+}
+.runtime-action-bar {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 240px);
+    align-items: end;
+    gap: 16px;
+}
+.runtime-action-bar > div {
+    width: auto !important;
+    min-width: 0 !important;
+    flex: initial !important;
+}
+.runtime-heading .section-copy {
+    max-width: 600px;
+}
+.runtime-action button,
+.sample-actions button {
+    min-height: 42px !important;
+}
+.runtime-select-grid {
+    display: block !important;
+    margin-top: 14px;
+}
+.runtime-select-grid > .form {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100% !important;
+    min-width: 0 !important;
+    gap: 12px;
+    overflow: visible !important;
+    border-color: transparent !important;
+    background: transparent !important;
+}
+.runtime-select-grid > .form > .block {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: initial !important;
+}
+.runtime-control-panel .block.padded,
+.custom-card .block.padded {
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: visible !important;
+}
+.runtime-control-panel [data-testid="block-info"],
+.custom-card [data-testid="block-info"] {
+    display: block !important;
+    margin: 0 0 6px !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: var(--muted) !important;
+    font-size: 0.73rem !important;
+    font-weight: 800 !important;
+}
+.runtime-control-panel .block > .container > .wrap,
+.custom-card .block > .container > .wrap {
+    border: 1px solid var(--rule) !important;
+    border-radius: var(--radius-sm) !important;
+    background: #FFFFFF !important;
+    box-shadow: 0 1px 2px rgba(23, 36, 45, 0.03) !important;
+}
+.runtime-control-panel .block > .container > .wrap:focus-within,
+.custom-card .block > .container > .wrap:focus-within {
+    border-color: var(--signal) !important;
+    box-shadow: 0 0 0 3px rgba(23, 111, 134, 0.14) !important;
+}
+.runtime-control-panel details {
+    margin-top: 12px;
+    border-top: 1px solid var(--rule);
+}
+.runtime-control-panel details summary {
+    min-height: 42px;
+    padding: 11px 2px;
+    color: var(--ink);
+    font-size: 0.88rem;
+    font-weight: 800;
+}
+.runtime-setup {
+    margin-bottom: 0 !important;
+}
+.section-title {
+    border-left-width: 3px;
+    padding-left: 9px;
+    font-size: 1rem;
+}
+.section-copy {
+    font-size: 0.86rem;
+    line-height: 1.45;
+}
+.custom-card,
+.dual-board-card {
+    padding: 16px;
+    border-radius: var(--radius-md);
+    border-color: var(--rule);
+    box-shadow: var(--shadow-sm);
+}
+.demo-shell {
+    gap: 16px;
+}
+.sample-actions {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+}
+.sample-actions button {
+    width: 100% !important;
+    margin-top: 0;
+}
+.desk-btn-primary {
+    background: var(--signal) !important;
+    border-color: var(--signal-hover) !important;
+    box-shadow: none !important;
+    transition: background 0.16s ease !important;
+}
+.desk-btn-primary:hover {
+    background: var(--signal-hover) !important;
+    transform: none;
+    box-shadow: none !important;
+}
+.desk-btn-secondary {
+    background: #FFFFFF !important;
+    border-color: var(--rule) !important;
+}
+.gradio-container button {
+    border-radius: var(--radius-sm) !important;
+}
+.gradio-container button:focus-visible,
+.gradio-container input:focus-visible,
+.gradio-container textarea:focus-visible,
+.gradio-container select:focus-visible,
+.gradio-container summary:focus-visible {
+    outline-color: rgba(23, 111, 134, 0.32) !important;
+}
+.weld-reference-card {
+    margin: 0;
+    padding: 10px;
+    border: 1px solid #C5DDD5;
+    border-radius: var(--radius-md);
+    background: #FFFFFF;
+}
+.weld-reference-card img {
+    display: block;
+    width: 100%;
+    max-height: 190px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+}
+.weld-reference-card figcaption {
+    margin-top: 7px;
+    color: var(--ink);
+    font-size: 0.75rem;
+    font-weight: 800;
+    text-align: center;
+}
+@media (max-width: 900px) {
+    .runtime-action-bar {
+        grid-template-columns: minmax(0, 1fr) 210px;
+    }
+    .runtime-select-grid > .form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 680px) {
+    .app-topbar {
+        margin: -16px -10px 0;
+        padding: 11px 14px;
+    }
+    .hero-panel {
+        margin-top: 12px;
+        padding: 16px;
+    }
+    .hero-panel h1 {
+        font-size: 1.8rem;
+    }
+    .runtime-control-panel,
+    .custom-card,
+    .dual-board-card {
+        padding: 14px;
+    }
+    .runtime-action-bar {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    .runtime-action button {
+        width: 100% !important;
+    }
+    .hero-metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 5px;
+    }
+    .hero-metrics span {
+        display: grid;
+        gap: 2px;
+        padding: 7px 8px;
+        font-size: 0.76rem;
+    }
+}
+@media (max-width: 500px) {
+    .runtime-select-grid > .form,
+    .sample-actions {
+        grid-template-columns: 1fr;
+    }
+    .hero-metrics {
+        grid-template-columns: 1fr;
+    }
 }
 """
 
-def create_ui():
+def create_ui(initial_dataset=None):
+    initial_dataset = str(initial_dataset or os.environ.get("GLLS_INITIAL_DATASET", "mvtec")).lower()
+    if initial_dataset not in {"mvtec", "visa", WELD_DATASET}:
+        initial_dataset = "mvtec"
     desk_theme = gr.themes.Soft(primary_hue="blue", neutral_hue="slate").set(
         block_radius="8px",
-        button_primary_background_fill="#3452C7",
-        button_primary_background_fill_hover="#2A43A8",
+        button_primary_background_fill="#176F86",
+        button_primary_background_fill_hover="#0D5C6F",
     )
 
     MVTEC_CLASSES = [
@@ -3204,8 +4287,23 @@ def create_ui():
         "candle", "capsules", "cashew", "chewinggum", "fryum", "macaroni1", 
         "macaroni2", "pcb1", "pcb2", "pcb3", "pcb4", "pipe_fryum"
     ]
+    dataset_classes = {
+        "mvtec": MVTEC_CLASSES,
+        "visa": VISA_CLASSES,
+        WELD_DATASET: [WELD_CATEGORY],
+    }
+    initial_classes = dataset_classes[initial_dataset]
+    initial_category = initial_classes[0]
+    initial_localizer_choices = (
+        ["AdaptCLIP"]
+        if initial_dataset == WELD_DATASET
+        else ["Auto", "ABounD", "AdaptCLIP"]
+    )
+    initial_localizer = "AdaptCLIP" if initial_dataset == WELD_DATASET else "Auto"
+    initial_shot_choices = ["1"] if initial_dataset == WELD_DATASET else ["1", "0"]
+    initial_checkpoint = _default_adaptclip_checkpoint(initial_dataset)
     
-    with gr.Blocks(css=CSS, theme=desk_theme, title="GLLS QA Method Desk") as demo:
+    with gr.Blocks(css=CSS, theme=desk_theme, title="GLLS Method Desk") as demo:
 
         with gr.Row(elem_classes="app-topbar"):
             with gr.Column(scale=3):
@@ -3214,7 +4312,7 @@ def create_ui():
                     <div class="brand-block">
                       <div class="brand-mark"></div>
                       <div class="brand-copy">
-                        <strong>GLLS QA Method Desk</strong>
+                        <strong>GLLS Method Desk</strong>
                         <small>Global logic, local evidence, SAM3 refinement, and PVLA/RAG provenance.</small>
                       </div>
                     </div>
@@ -3230,100 +4328,92 @@ def create_ui():
                 <div class="eyebrow">Dual-stream anomaly reasoning demo</div>
                 <h1>GLLS Verification Board</h1>
                 <p class="hero-copy">
-                  Choose a QA sample, initialize the runtime, and inspect how global logic,
-                  fine-grained action search, PVLA graph recall, and the final verifier work together.
+                  Load a review sample, initialize the selected weights, and inspect the evidence
+                  passed from global logic and local search to the final decision.
                 </p>
               </div>
               <div class="hero-metrics">
-                <span><b>1</b><em>Initialize runtime</em></span>
-                <span><b>2</b><em>Load QA sample</em></span>
-                <span><b>3</b><em>Run dual-stream verifier</em></span>
+                <span><b>1</b><em>Configure runtime</em></span>
+                <span><b>2</b><em>Load review sample</em></span>
+                <span><b>3</b><em>Run verifier</em></span>
               </div>
             </section>
             """
         )
 
-        with gr.Row(elem_classes="quick-start"):
-            with gr.Column(scale=3, elem_classes="quick-start-copy"):
-                gr.HTML(
-                    """
-                    <h3>Quick start</h3>
-                    <p>Choose the dataset/localizer/shot, initialize the matching weights, then run the verifier.</p>
-                    """
+        with gr.Column(elem_classes="runtime-control-panel"):
+            with gr.Row(elem_classes="runtime-action-bar"):
+                with gr.Column(scale=3, elem_classes="runtime-heading"):
+                    gr.Markdown("### Runtime", elem_classes="section-title")
+                    gr.Markdown(
+                        "Initialize the selected weights before running a review sample.",
+                        elem_classes="section-copy",
+                    )
+                with gr.Column(scale=1, elem_classes="runtime-action"):
+                    btn_init = gr.Button("Initialize runtime", elem_classes="desk-btn-primary")
+            with gr.Row(elem_classes="runtime-select-grid"):
+                dd_gpu = gr.Dropdown(_gpu_choices(), value=_default_gpu_id(), label="GPU")
+                dd_dataset = gr.Dropdown(
+                    ["mvtec", "visa", WELD_DATASET],
+                    label="Dataset",
+                    value=initial_dataset,
                 )
-            with gr.Column(scale=1, elem_classes="quick-action"):
-                btn_init = gr.Button("Initialize runtime", elem_classes="desk-btn-primary")
-            with gr.Column(scale=1, elem_classes="quick-action"):
-                btn_run_main = gr.Button("Run GLLS", variant="primary", elem_classes="desk-btn-primary")
-
-        with gr.Column(elem_classes="custom-card runtime-config-panel"):
-            gr.Markdown("### Runtime Configuration", elem_classes="section-title")
-            gr.Markdown(
-                "This controls the actual localizer weights loaded into memory. Changing any field requires re-initializing before a run.",
-                elem_classes="section-copy",
-            )
-            with gr.Row():
-                dd_dataset = gr.Dropdown(["mvtec", "visa"], label="Dataset", value="mvtec")
                 dd_localizer = gr.Dropdown(
-                    ["Auto", "ABounD", "AdaptCLIP"],
+                    initial_localizer_choices,
                     label="Localizer",
-                    value="Auto",
+                    value=initial_localizer,
                 )
                 dd_kshot = gr.Dropdown(
-                    ["1", "0"],
+                    initial_shot_choices,
                     value="1",
                     label="Shot",
                 )
-            txt_runtime_weights = gr.Textbox(
-                label="Selected adapted weights",
-                value=_runtime_weight_summary(
-                    _runtime_weight_config("mvtec", "Auto", "1", DEFAULT_ADAPTCLIP_CHECKPOINT_PATH)
-                ),
-                lines=5,
-                interactive=False,
-            )
-
-        with gr.Accordion("Runtime setup (read from local_paths.sh by default)", open=False):
-            gr.Markdown(
-                "Set paths once in `scripts/dev/local_paths.sh`, then start this page with "
-                "`bash scripts/run/run_visualize.sh`. These fields are only for overriding the active session."
-            )
-            with gr.Row():
-                dd_model_type = gr.Dropdown(
-                    ["qwen3-vl", "qwen2.5-vl", "llava-onevision"],
-                    label="VLM architecture",
-                    value="qwen3-vl",
+            with gr.Accordion("Selected adapted weights", open=False):
+                txt_runtime_weights = gr.Textbox(
+                    label="Resolved paths",
+                    value=_runtime_weight_summary(
+                        _runtime_weight_config(initial_dataset, initial_localizer, "1", initial_checkpoint)
+                    ),
+                    lines=5,
+                    interactive=False,
                 )
-                dd_gpu = gr.Dropdown([str(i) for i in range(8)], value="0", label="GPU")
-                cb_vllm = gr.Checkbox(label="Use vLLM if installed", value=False, interactive=True)
-                sl_gpu_util = gr.Slider(0.3, 0.95, value=0.85, step=0.05, label="vLLM memory fraction")
-            with gr.Row():
-                p_model = gr.Textbox(DEFAULT_VLM_MODEL_PATH, label="VLM model folder")
-                p_sam = gr.Textbox(DEFAULT_SAM3_PATH, label="SAM3 checkpoint")
-            with gr.Row():
-                p_data = gr.Textbox(DEFAULT_MMAD_ROOT, label="MMAD dataset root")
-                p_qa = gr.Textbox(DEFAULT_QA_ROOT, label="Curated QA root")
-            with gr.Row():
-                p_ckpt = gr.Textbox(
-                    DEFAULT_ADAPTCLIP_CHECKPOINT_PATH,
-                    label="AdaptCLIP checkpoint (used when AdaptCLIP is selected)",
-                )
-                p_graph = gr.Textbox(DEFAULT_GRAPH_ROOT, label="PVLA graph cache root")
+            with gr.Accordion("Advanced runtime paths", open=False, elem_classes="runtime-setup"):
+                with gr.Row():
+                    dd_model_type = gr.Dropdown(
+                        ["qwen3-vl", "qwen2.5-vl", "llava-onevision"],
+                        label="VLM architecture",
+                        value="qwen3-vl",
+                    )
+                    cb_vllm = gr.Checkbox(label="Use vLLM if installed", value=False, interactive=True)
+                    sl_gpu_util = gr.Slider(0.3, 0.95, value=0.85, step=0.05, label="vLLM memory fraction")
+                with gr.Row():
+                    p_model = gr.Textbox(DEFAULT_VLM_MODEL_PATH, label="VLM model folder")
+                    p_sam = gr.Textbox(DEFAULT_SAM3_PATH, label="SAM3 checkpoint")
+                with gr.Row():
+                    p_data = gr.Textbox(DEFAULT_MMAD_ROOT, label="MMAD dataset root")
+                    p_qa = gr.Textbox(DEFAULT_QA_ROOT, label="Curated QA root")
+                with gr.Row():
+                    p_ckpt = gr.Textbox(
+                        initial_checkpoint,
+                        label="AdaptCLIP checkpoint (used when AdaptCLIP is selected)",
+                    )
+                    p_graph = gr.Textbox(DEFAULT_GRAPH_ROOT, label="PVLA graph cache root")
 
         with gr.Row(elem_classes="demo-shell"):
             with gr.Column(scale=1, min_width=390):
                 with gr.Column(elem_classes="custom-card"):
-                    gr.Markdown("### QA Sample", elem_classes="section-title")
-                    gr.Markdown("Choose a category and one question from the active dataset. Rows refresh automatically; use the local button if you need to reload.", elem_classes="section-copy")
+                    gr.Markdown("### Review Sample", elem_classes="section-title")
+                    gr.Markdown("Choose a category and review case, then run the verifier.", elem_classes="section-copy")
                     with gr.Row():
-                        dd_cat = gr.Dropdown(MVTEC_CLASSES, label="Category", value="bottle", interactive=True)
+                        dd_cat = gr.Dropdown(initial_classes, label="Category", value=initial_category, interactive=True)
                     with gr.Row(elem_classes="sample-actions"):
-                        btn_load = gr.Button("Load QA rows", elem_classes="desk-btn-secondary")
+                        btn_load = gr.Button("Load cases", elem_classes="desk-btn-secondary")
+                        btn_run_main = gr.Button("Run GLLS", variant="primary", elem_classes="desk-btn-primary")
                     with gr.Row():
                         dd_sub_type = gr.Dropdown(label="Defect folder", choices=["All"], value="All")
                         dd_logic = gr.Dropdown(label="Task", choices=["All"], value="All")
                     txt_search_case = gr.Textbox(placeholder="image name / question / task", label="Search")
-                    dd_samples_list = gr.Dropdown(label="Question", choices=[], interactive=True)
+                    dd_samples_list = gr.Dropdown(label="Review case / Question", choices=[], interactive=True)
                     img_preview_in = gr.Image(label="Input image", type="pil", height=300, elem_classes="desk-image-upload")
                     txt_q_in = gr.Textbox(label="Question", lines=2)
                     with gr.Accordion("Answer options", open=False):
@@ -3333,7 +4423,11 @@ def create_ui():
             with gr.Column(scale=2):
                 with gr.Column(elem_classes="dual-board-card"):
                     gr.Markdown("### Dual-Stream Verification Board", elem_classes="section-title")
-                    md_method_process = gr.HTML(_method_process_placeholder())
+                    md_method_process = gr.HTML(
+                        render_weld_placeholder()
+                        if initial_dataset == WELD_DATASET
+                        else _method_process_placeholder()
+                    )
 
                     with gr.Accordion("PVLA details / RAG recall", open=False):
                         with gr.Row(elem_classes="evidence-pair"):
@@ -3350,7 +4444,7 @@ def create_ui():
                             with gr.Column(scale=1, elem_classes="evidence-detail"):
                                 txt_rag_manual = gr.TextArea(label="Retrieved text knowledge", lines=7, interactive=False)
 
-                    with gr.Accordion("Run visuals — logic view, heatmap & crops", open=True):
+                    with gr.Accordion("Run visuals — logic view, heatmap & crops", open=False):
                         gr.Markdown("Stream 1 · Global & logic", elem_classes="section-title-sm")
                         with gr.Row(equal_height=True, elem_classes="evidence-pair"):
                             with gr.Column(scale=1):
@@ -3360,7 +4454,13 @@ def create_ui():
                         gr.Markdown("Stream 2 · Fine-grained & actions", elem_classes="section-title-sm")
                         with gr.Row(elem_classes="evidence-pair"):
                             with gr.Column(scale=1):
-                                img_hm_out = gr.Image(label="Anomaly heatmap", type="pil", height=250, elem_classes="evidence-image")
+                                img_hm_out = gr.Image(
+                                    label="Anomaly heatmap",
+                                    type="pil",
+                                    height=250,
+                                    elem_classes="evidence-image",
+                                    interactive=False,
+                                )
                             with gr.Column(scale=1):
                                 state_redbox_pil = gr.Image(label="Global red-box trace", type="pil", height=250, elem_classes="evidence-image", interactive=False)
                         gal_sam3_preview = gr.Gallery(
@@ -3369,6 +4469,7 @@ def create_ui():
                             height=230,
                             object_fit="contain",
                             preview=True,
+                            interactive=False,
                         )
                         file_sam3_editor = gr.File(
                             label="Selected focus files",
@@ -3441,22 +4542,46 @@ def create_ui():
             ],
             outputs=status_box,
             api_name=False,
+            concurrency_limit=1,
+            concurrency_id="glls_runtime",
         )
         
         # 2. Update Category List when Dataset Changes
         def update_cat_list(ds_name):
             if ds_name == "mvtec":
                 ckpt = _default_adaptclip_checkpoint("mvtec")
-                return gr.update(choices=MVTEC_CLASSES, value=MVTEC_CLASSES[0]), gr.update(value=ckpt), ckpt
-            ckpt = _default_adaptclip_checkpoint("visa")
-            return gr.update(choices=VISA_CLASSES, value=VISA_CLASSES[0]), gr.update(value=ckpt), ckpt
+                categories = MVTEC_CLASSES
+                localizer_update = gr.update(choices=["Auto", "ABounD", "AdaptCLIP"], value="Auto")
+                shot_update = gr.update(choices=["1", "0"], value="1")
+                localizer_value = "Auto"
+            elif ds_name == "visa":
+                ckpt = _default_adaptclip_checkpoint("visa")
+                categories = VISA_CLASSES
+                localizer_update = gr.update(choices=["Auto", "ABounD", "AdaptCLIP"], value="Auto")
+                shot_update = gr.update(choices=["1", "0"], value="1")
+                localizer_value = "Auto"
+            else:
+                ckpt = _default_adaptclip_checkpoint(WELD_DATASET)
+                categories = [WELD_CATEGORY]
+                localizer_update = gr.update(choices=["AdaptCLIP"], value="AdaptCLIP")
+                shot_update = gr.update(choices=["1"], value="1")
+                localizer_value = "AdaptCLIP"
+            return (
+                gr.update(choices=categories, value=categories[0]),
+                gr.update(value=ckpt),
+                localizer_update,
+                shot_update,
+                ckpt,
+                categories[0],
+                localizer_value,
+            )
 
-        def runtime_preview(ds_name, localizer_choice, k_shot, ckpt_path):
+        def runtime_preview(ds_name, localizer_choice, k_shot, ckpt_path, gpu_id):
             try:
                 cfg = _runtime_weight_config(ds_name, localizer_choice, k_shot, ckpt_path)
             except Exception as e:
                 return f"Invalid runtime configuration: {e}", f"Runtime config invalid: {e}"
-            ok, _, _ = global_sys.runtime_match_status(ds_name, localizer_choice, k_shot, ckpt_path)
+            ok, _, _ = global_sys.runtime_match_status(ds_name, localizer_choice, k_shot, ckpt_path, gpu_id)
             if ok:
                 status_msg = "Runtime ready for selected weights."
             elif global_sys.is_initialized:
@@ -3469,14 +4594,54 @@ def create_ui():
             return None, "", "", "", "{}"
 
         def sample_payload_from_choice(idx_str):
+            if str(idx_str or "").startswith(WELD_TASK_PREFIX):
+                payload = global_sys.weld_runtime.sample_payload(idx_str)
+                return (
+                    gr.update(value=payload["image"], interactive=False),
+                    payload["question"],
+                    payload["task"],
+                    payload["ground_truth"],
+                    json.dumps(payload["options"], indent=2, ensure_ascii=False),
+                )
             if not idx_str or not global_sys.data_manager:
                 return empty_case_payload()
             idx = int(idx_str.split("|")[0].strip())
             img, q, t, gt, opts = global_sys.data_manager.get_sample_by_idx(idx)
-            return img, q, t, gt, json.dumps(opts, indent=2, ensure_ascii=False)
+            return gr.update(value=img, interactive=True), q, t, gt, json.dumps(opts, indent=2, ensure_ascii=False)
 
         # 3. Load Dataset & Reset Subclass/Logic Dropdowns
-        def on_cat_load(ds_name, c, localizer_choice="Auto", k_shot=1, ckpt_path=DEFAULT_ADAPTCLIP_CHECKPOINT_PATH):
+        def on_cat_load(ds_name, c, localizer_choice="Auto", k_shot=1, ckpt_path=DEFAULT_ADAPTCLIP_CHECKPOINT_PATH, gpu_id="0"):
+            if ds_name == WELD_DATASET:
+                weight_summary, runtime_msg = runtime_preview(
+                    ds_name,
+                    "AdaptCLIP",
+                    "1",
+                    ckpt_path,
+                    gpu_id,
+                )
+                try:
+                    choices = global_sys.weld_runtime.sample_choices()
+                    selected_sample = choices[0][1] if choices else None
+                    msg = (
+                        f"[WELD] {WELD_CATEGORY} loaded: {len(choices)} qualitative review images | "
+                        f"{runtime_msg}"
+                    )
+                except Exception as e:
+                    choices = []
+                    selected_sample = None
+                    msg = f"Weld demo unavailable: {e} | {runtime_msg}"
+                return (
+                    gr.update(
+                        choices=["All", "annotated_anomaly", "allowed_context", "unlabeled"],
+                        value="All",
+                    ),
+                    gr.update(choices=["All", "weld_inspection"], value="All"),
+                    gr.update(choices=choices, value=selected_sample),
+                    *sample_payload_from_choice(selected_sample),
+                    weight_summary,
+                    msg,
+                    render_weld_placeholder(),
+                )
             if not global_sys.data_manager:
                 global_sys.data_manager = DatasetManager(DEFAULT_MMAD_ROOT, DEFAULT_QA_ROOT, ds_name or "mvtec")
             if ds_name and global_sys.data_manager.dataset_name != ds_name:
@@ -3486,7 +4651,7 @@ def create_ui():
                     ds_name,
                 )
             msg = global_sys.data_manager.load_subclass(c)
-            weight_summary, runtime_msg = runtime_preview(ds_name, localizer_choice, k_shot, ckpt_path)
+            weight_summary, runtime_msg = runtime_preview(ds_name, localizer_choice, k_shot, ckpt_path, gpu_id)
             msg = f"{msg} | {runtime_msg}"
             # FORCE RESET of dropdowns to prevent cross-dataset sticky values
             subs = ["All"] + global_sys.data_manager.subfolder_choices
@@ -3517,56 +4682,95 @@ def create_ui():
             md_method_process,
         ]
 
-        def on_dataset_change(ds_name, localizer_choice, k_shot):
-            cat_update, ckpt_update, next_ckpt = update_cat_list(ds_name)
-            next_category = MVTEC_CLASSES[0] if ds_name == "mvtec" else VISA_CLASSES[0]
-            return cat_update, ckpt_update, *on_cat_load(ds_name, next_category, localizer_choice, k_shot, next_ckpt)
+        def on_dataset_change(ds_name, gpu_id):
+            (
+                cat_update,
+                ckpt_update,
+                localizer_update,
+                shot_update,
+                next_ckpt,
+                next_category,
+                next_localizer,
+            ) = update_cat_list(ds_name)
+            return (
+                cat_update,
+                ckpt_update,
+                localizer_update,
+                shot_update,
+                *on_cat_load(ds_name, next_category, next_localizer, "1", next_ckpt, gpu_id),
+            )
 
         dd_dataset.change(
             on_dataset_change,
-            [dd_dataset, dd_localizer, dd_kshot],
-            [dd_cat, p_ckpt, *qa_load_outputs],
+            [dd_dataset, dd_gpu],
+            [dd_cat, p_ckpt, dd_localizer, dd_kshot, *qa_load_outputs],
             api_name=False,
+            queue=False,
         )
         dd_cat.change(
             on_cat_load,
-            [dd_dataset, dd_cat, dd_localizer, dd_kshot, p_ckpt],
+            [dd_dataset, dd_cat, dd_localizer, dd_kshot, p_ckpt, dd_gpu],
             qa_load_outputs,
             api_name=False,
+            queue=False,
         )
         btn_load.click(
             on_cat_load,
-            [dd_dataset, dd_cat, dd_localizer, dd_kshot, p_ckpt],
+            [dd_dataset, dd_cat, dd_localizer, dd_kshot, p_ckpt, dd_gpu],
             qa_load_outputs,
             api_name=False,
+            queue=False,
         )
         demo.load(
             on_cat_load,
-            [dd_dataset, dd_cat, dd_localizer, dd_kshot, p_ckpt],
+            [dd_dataset, dd_cat, dd_localizer, dd_kshot, p_ckpt, dd_gpu],
             qa_load_outputs,
             api_name=False,
         )
 
-        for runtime_trigger in [dd_localizer, dd_kshot, p_ckpt]:
+        for runtime_trigger in [dd_localizer, dd_kshot, p_ckpt, dd_gpu]:
             runtime_trigger.change(
                 runtime_preview,
-                [dd_dataset, dd_localizer, dd_kshot, p_ckpt],
+                [dd_dataset, dd_localizer, dd_kshot, p_ckpt, dd_gpu],
                 [txt_runtime_weights, status_box],
                 api_name=False,
+                queue=False,
             )
 
         # 4. Filter Samples
-        def on_filter_update(s_f, l_f, search_t):
-            if not global_sys.data_manager: return gr.update(choices=[])
+        def on_filter_update(ds_name, s_f, l_f, search_t):
+            if ds_name == WELD_DATASET:
+                try:
+                    choices = global_sys.weld_runtime.sample_choices(s_f, search_t)
+                    selected = choices[0][1] if choices else None
+                except Exception:
+                    choices = []
+                    selected = None
+                return (
+                    gr.update(choices=choices, value=selected),
+                    *sample_payload_from_choice(selected),
+                )
+            if not global_sys.data_manager:
+                return gr.update(choices=[]), *empty_case_payload()
             choices = global_sys.data_manager.filter_samples(
                 subfolder=None if s_f == "All" else s_f,
                 task_type=None if l_f == "All" else l_f,
                 search_query=search_t
             )
-            return gr.update(choices=choices, value=choices[0] if choices else None)
+            selected = choices[0] if choices else None
+            return (
+                gr.update(choices=choices, value=selected),
+                *sample_payload_from_choice(selected),
+            )
 
         for trigger in [dd_sub_type, dd_logic, txt_search_case]:
-            trigger.change(on_filter_update, [dd_sub_type, dd_logic, txt_search_case], dd_samples_list, api_name=False)
+            trigger.change(
+                on_filter_update,
+                [dd_dataset, dd_sub_type, dd_logic, txt_search_case],
+                [dd_samples_list, img_preview_in, txt_q_in, txt_hidden_t_type, txt_gt_out, txt_opts_json],
+                api_name=False,
+                queue=False,
+            )
 
         # 5. Select Case & Update Options State
         def on_select_case_id(idx_str):
@@ -3576,6 +4780,7 @@ def create_ui():
             on_select_case_id, dd_samples_list, 
             [img_preview_in, txt_q_in, txt_hidden_t_type, txt_gt_out, txt_opts_json],
             api_name=False,
+            queue=False,
         )
 
         # 6. Run Actions
@@ -3592,9 +4797,12 @@ def create_ui():
                 dd_localizer,
                 dd_kshot,
                 p_ckpt,
+                dd_gpu,
             ],
             outputs=[gal_rag_source, txt_rag_manual, img_hm_out, gal_sam3_preview, file_sam3_editor, txt_logs_stream, md_final_res, txt_cot_edit, state_redbox_pil, state_crops_paths, img_logic_debug, md_p1_prompt, md_method_process],
             api_name=False,
+            concurrency_limit=1,
+            concurrency_id="glls_runtime",
         )
 
         export_outputs = [file_export_zip, txt_export_status] if file_export_zip is not None else [btn_export_zip, txt_export_status]
@@ -3634,6 +4842,12 @@ def main():
     parser.add_argument("--start_port", type=int, default=7860, help="First port to try when --port is not set.")
     parser.add_argument("--max_queue", type=int, default=5, help="Gradio queue max size.")
     parser.add_argument("--show_api", action="store_true", help="Show Gradio API docs.")
+    parser.add_argument(
+        "--initial_dataset",
+        choices=["mvtec", "visa", WELD_DATASET],
+        default=os.environ.get("GLLS_INITIAL_DATASET", "mvtec"),
+        help="Dataset selected when the shared demo first opens.",
+    )
     args = parser.parse_args()
 
     # Gradio uses httpx for local connectivity checks. If http_proxy or
@@ -3648,9 +4862,9 @@ def main():
     )
 
     port = args.port if args.port is not None else find_free_port(args.start_port)
-    print(f"GLLS QA Method Desk launched at http://localhost:{port}")
-    patch_starlette_template_response_compat()
-    app = create_ui()
+    print(f"GLLS Method Desk launched at http://localhost:{port}")
+    patch_gradio_compat()
+    app = create_ui(args.initial_dataset)
     app.queue(max_size=args.max_queue).launch(server_name=args.host, server_port=port, show_api=args.show_api)
 
 

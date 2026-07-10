@@ -461,6 +461,11 @@ class AdaptCLIP_Localizer():
         self.prompt_image_memory = {}
         self.prompt_patch_memory = {}
         self.last_image_score = None
+        self.domain_prompt_config = {
+            "object_name": "object",
+            "normal_states": None,
+            "anomaly_states": None,
+        }
         self._image_thresholds_by_shot, self._pixel_thresholds_by_shot = _threshold_tables_by_shot(model_config)
         
         # Override default config with args if present
@@ -523,6 +528,44 @@ class AdaptCLIP_Localizer():
 
         # 7. Setup Transform
         self.transform, _ = get_transform_adaptclip(image_size=self.cfg['image_size'])
+
+    def configure_text_prompts(self, object_name, *, normal_states=None, anomaly_states=None):
+        """Replace only AdaptCLIP's static zero-shot descriptions for a domain.
+
+        Learned adapter prompts and checkpoint weights remain unchanged. Calling
+        this method is optional; the default generic "object" prompts are kept for
+        all existing dataset routes.
+        """
+        self.domain_prompt_config = {
+            "object_name": str(object_name or "object"),
+            "normal_states": list(normal_states) if normal_states else None,
+            "anomaly_states": list(anomaly_states) if anomaly_states else None,
+        }
+        self.textual_learner.prepare_static_text_feature(
+            self.model,
+            object_name=self.domain_prompt_config["object_name"],
+            normal_states=self.domain_prompt_config["normal_states"],
+            anomaly_states=self.domain_prompt_config["anomaly_states"],
+        )
+
+    def encode_image_embedding(self, image):
+        """Return the normalized AdaptCLIP backbone embedding for PVLA retrieval."""
+        if not isinstance(image, Image.Image):
+            raise TypeError("encode_image_embedding expects a PIL image")
+        tensor = self.preprocess(image.convert("RGB"))
+        with torch.no_grad():
+            image_features, _ = self.model.encode_image(
+                tensor,
+                self.cfg['features_list'],
+                DPAM_layer=self.DPAM_layer,
+            )
+        features = image_features.float()
+        while features.ndim > 2 and features.shape[1] == 1:
+            features = features.squeeze(1)
+        if features.ndim > 2:
+            features = features.mean(dim=1)
+        features = F.normalize(features, dim=-1)
+        return features[0].detach().cpu().numpy()
 
     def configure_support(self, category, train_image_paths):
         self.active_category = category

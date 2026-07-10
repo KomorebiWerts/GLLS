@@ -995,21 +995,28 @@ class TextualAdapter(nn.Module):
 
         return prompts, tokenized_prompts
 
-    def prompt(self):
-        norm_class_state = [ele.format('object') for ele in self.static_normal_list]
+    def prompt(self, object_name='object', normal_states=None, anomaly_states=None):
+        normal_states = normal_states or self.static_normal_list
+        anomaly_states = anomaly_states or self.static_anomaly_list
+        norm_class_state = [ele.format(object_name) for ele in normal_states]
         normal_static_template = [class_template.format(ele) for ele in norm_class_state for class_template in self.template_list]
-        abnormal_class_state = [ele.format('object') for ele in self.static_anomaly_list]
+        abnormal_class_state = [ele.format(object_name) for ele in anomaly_states]
         anomaly_static_template = [class_template.format(ele) for ele in abnormal_class_state for class_template in self.template_list]
 
         return normal_static_template, anomaly_static_template
 
-    def prepare_static_text_feature(self, model):
-        normal_description, abnormal_description = self.prompt()
+    def prepare_static_text_feature(self, model, object_name='object', normal_states=None, anomaly_states=None):
+        normal_description, abnormal_description = self.prompt(
+            object_name=object_name,
+            normal_states=normal_states,
+            anomaly_states=anomaly_states,
+        )
         normal_tokens = tokenize(normal_description)
         abnormal_tokens = tokenize(abnormal_description)
+        model_device = next(model.parameters()).device
         with torch.no_grad():
-            normal_text_features = model.encode_text(normal_tokens.cuda()).float()
-            abnormal_text_features = model.encode_text(abnormal_tokens.cuda()).float()
+            normal_text_features = model.encode_text(normal_tokens.to(model_device)).float()
+            abnormal_text_features = model.encode_text(abnormal_tokens.to(model_device)).float()
 
         avg_normal_text_features = torch.mean(normal_text_features, dim = 0, keepdim= True)
         avg_abnormal_text_features = torch.mean(abnormal_text_features, dim = 0, keepdim= True)

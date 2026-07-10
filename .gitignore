@@ -64,3 +64,12 @@ heatmap_sensitivity_compact.json
 
 # Local GLLS path overrides
 scripts/dev/local_paths.sh
+
+# Project-local Codex home, auth, and runtime state
+.codex-home/
+
+# Private weld data and locally exported figure material
+/焊缝缺陷检测数据/
+/docs/assets/glls_weld_three_demo_flow.*
+/docs/assets/weld_demo_sources/
+/docs/assets/weld_anomaly_cases/
