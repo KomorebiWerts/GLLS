@@ -11,6 +11,68 @@ Main entrypoints:
 - `glls.cli.run`: DS-MVTec and VisA QA evaluation.
 - `glls.cli.binary_ad`: MPDD, DTD-Synthetic, and DAGM binary AD.
 - `glls.cli.visualize`: Gradio frontend for single-question inspection.
+- `glls.cli.weld_ad`: gear-weld preparation, SAM3/PVLA asset construction,
+  and qualitative tiled AdaptCLIP review.
+- `glls.cli.weld_visualize`: compatibility launcher for the shared frontend in
+  `weld / gear_weld` mode.
+
+## Gear Weld Dataset
+
+The repository includes a dedicated route for the archives under
+`焊缝缺陷检测数据/`. It keeps the source ZIP/PDF files unchanged, converts the
+LabelMe polygons to compact annotations and masks, builds source-backed weld
+knowledge, creates a one-image PVLA atlas from the PDF normal example, and
+reviews high-resolution images with overlapping AdaptCLIP tiles.
+
+```bash
+source scripts/dev/activate_glls.sh
+bash scripts/run/run_weld_ad.sh \
+  --stage all \
+  --source_root "焊缝缺陷检测数据" \
+  --prepared_root "焊缝缺陷检测数据/prepared_glls" \
+  --output_dir outputs/weld_ad \
+  --shots 0 1 \
+  --device cuda:0 \
+  --sam_device cuda:0 \
+  --tile_size 1600 \
+  --tile_overlap 0.25
+```
+
+`原始数据.zip` contains 45 unlabeled images and is never treated as a normal
+support pool. `annotation_data.zip` contains 50 independent images with LabelMe
+region polygons; it is not paired with the raw archive and does not provide an
+official train/test split. For station-2 sample review, the PDF-backed mapping
+is explicit: `ljtq` is a connection protrusion that must be detected and
+filtered but is not anomalous by itself, while `dx` is a compact defect/spatter
+region and maps the reviewed image to NG. These reference labels support the UI
+comparison only; they do not authorize an aggregate benchmark claim.
+
+The one-shot support is the image captioned `正常图像` on page 4 of
+`焊缝缺陷检测升级.pdf`. Its ring and eight arc crops are deterministic derivatives
+of the same image. Launch the qualitative frontend with:
+
+```bash
+bash scripts/run/run_weld_visualize.sh --start_port 7865
+```
+
+If the prepared data is outside the repository, point the frontend at it before
+launching:
+
+```bash
+export GLLS_WELD_MANIFEST=/path/to/prepared_glls/manifest.json
+```
+
+This opens the same GLLS Method Desk used by MVTec and VisA, preselected to the
+single `gear_weld` category. The board shows global weld logic, tiled AdaptCLIP
+evidence and online crops, the source-backed PVLA offline graph plus one-shot
+normal prior, the SAM3 structure overlay and rule audit, explicit OR fusion, and
+the prediction/reference comparison in one trace-backed view.
+
+The shared frontend leads with one annotated station-2 `dx` anomaly and two
+unlabeled station-1 structural diagnostics. The station-1 cases remain
+explicitly `UNSCORED` because the raw archive has no official image-level
+ground truth. These cases exercise complementary evidence paths without
+per-sample retuning and are not presented as aggregate benchmark evidence.
 
 ## Motivation
 
@@ -308,28 +370,6 @@ For the published ABounD artifact path, choose `mvtec` or `visa` with `1-shot`
 in the frontend. The frontend will load ABounD from `GLLS_ABOUND_MODEL_PATH` and
 `GLLS_ABOUND_SAVE_PATH`. Choose `0-shot` for MVTec/VisA to use AdaptCLIP; other
 dataset/shot combinations also use AdaptCLIP.
-
-Representative frontend captures:
-
-<p align="center">
-  <img src="docs/assets/frontend/frontend_pvla_cable.png" alt="GLLS frontend cable sample selection and PVLA graph-shaped knowledge" width="900">
-</p>
-
-<p align="center">
-  <img src="docs/assets/frontend/frontend_evidence_streams.png" alt="GLLS frontend global stream local search stream and fusion summary" width="900">
-</p>
-
-<p align="center">
-  <img src="docs/assets/frontend/frontend_run_visuals_cable.png" alt="GLLS frontend cable logic view anomaly heatmap and local evidence crops" width="900">
-</p>
-
-<p align="center">
-  <img src="docs/assets/frontend/frontend_pvla_pcb.png" alt="GLLS frontend PCB sample selection and PVLA graph-shaped knowledge" width="900">
-</p>
-
-<p align="center">
-  <img src="docs/assets/frontend/frontend_run_visuals_pcb.png" alt="GLLS frontend PCB anomaly heatmap red-box trace and focus crop views" width="900">
-</p>
 
 ## Run MPDD / DTD / DAGM Binary AD
 
